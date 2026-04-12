@@ -1,0 +1,63 @@
+; Source01.asm
+; PIC16F877A test source code
+; 
+; Displays an LED lighting pattern and delays
+
+PROCESSOR 16F877A
+#include <xc.inc>
+
+CONFIG FOSC = XT
+CONFIG WDTE = OFF
+CONFIG PWRTE = ON
+CONFIG CP = OFF
+
+GLOBAL _main
+GLOBAL start_initialization
+    
+PSECT udata_bank0
+COUNT1: DS 1
+COUNT2: DS 1
+COUNT3: DS 1
+    
+PSECT code,class=CODE,delta=2
+
+start_initialization:    
+_main:
+	    BSF	    STATUS, 5
+	    CLRF    TRISD
+	    BCF	    STATUS, 5
+	    CLRF    PORTD
+
+LOOP:
+	MOVLW	0x55
+	MOVWF	PORTD
+	CALL	DELAY
+	MOVLW	0xAA
+	MOVWF	PORTD
+	CALL	DELAY
+	MOVLW	0x00
+	MOVWF	PORTD
+	CALL	DELAY
+	MOVLW	0xFF
+	MOVWF	PORTD
+	CALL	DELAY
+	GOTO	LOOP
+
+DELAY:
+	MOVLW	100
+	MOVWF	COUNT1
+D1:
+	MOVLW	100
+	MOVWF	COUNT2
+D2:
+	MOVLW	20
+	MOVWF	COUNT3
+D3:
+	NOP
+	DECFSZ	COUNT3, F
+	GOTO	D3
+	DECFSZ	COUNT2, F
+	GOTO	D2
+	DECFSZ	COUNT1, F
+	GOTO	D1
+	RETURN
