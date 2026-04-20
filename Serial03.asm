@@ -12,7 +12,9 @@
 	__CONFIG _CP_OFF & _WDT_OFF & _PWRTE_ON & _XT_OSC
 	
 	CBLOCK 0x20
-
+	    D1
+	    D2
+	    D3
 	ENDC
 	
 	ORG 0x0000
@@ -23,6 +25,7 @@
 	
 START:
 	CALL	    USART_Init
+	CALL	    Delay
 	MOVLW	    'S'
 	CALL	    USART_SendByte
 	MOVLW	    'e'
@@ -53,5 +56,20 @@ LOOP:
 	CALL	    USART_GetByte
 	CALL	    USART_SendByte
 	GOTO	    LOOP
+	
+Delay:	MOVLW	50		    ; delay routine
+	MOVWF	D1		    ; nested loops
+Del1:	MOVLW	50		    ; 50 * 50 * 40 = 100,000
+	MOVWF	D2
+Del2:	MOVLW	40
+	MOVWF	D3
+Del3:	NOP
+	DECFSZ	D3, F
+	GOTO	Del3
+	DECFSZ	D2, F
+	GOTO	Del2
+	DECFSZ	D1, F
+	GOTO	Del1
+	RETURN
 	
 	END
