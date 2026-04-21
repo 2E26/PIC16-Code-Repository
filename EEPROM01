@@ -1,0 +1,118 @@
+; EEPROM01.asm
+;
+; The first in a series of programs to load 6502 assembly code into ROM memory using a PIC16 MCU
+; Loads a fixed set of machine code instructions into ROM starting at 7E00h as well as the
+; reset and interrupt vectors at 7FFAh - 7FFFh.
+;
+; Note that ROM memory is 8000h less than actual computer memory, as current ROM occupies the upper
+; 32K of memory available to the 6502.
+;
+; Based on the MPASM assembler
+
+        LIST                P=16F877A
+        #include                <P16F877A.inc>
+        #include                "USART.asm"
+
+        __CONFIG _CP_OFF & _WDT_OFF & _PWRTE_ON & _XT_OSC
+
+        CBLOCK 0x20
+                D1
+                D2
+                D3
+                Databyte
+        ENDC
+
+        ORG 0x0000
+        GOTO START
+
+        ORG 0x0004
+        RETFIE
+
+; Program flow:
+;
+; 1) initialize USART, initialize GPIO registers, and wait for a key
+; 2) display a prompt 
+; 3) load program into the EEPROM one byte at a time
+; 4) check the EEPROM to ensure the 
+;
+
+START:
+        BCF                0x03, 6                        ; set memory bank 1
+        BSF                0x03, 5
+        CALL                USART_Init
+        CALL                Delay
+        CALL                USART_GetByte
+        MOVLW                'P'
+        CALL                USART_SendByte
+        MOVLW                'r'
+        CALL                USART_SendByte
+        MOVLW                'e'
+        CALL                USART_SendByte
+        MOVLW                's'
+        CALL                USART_SendByte
+        MOVLW                's'
+        CALL                USART_SendByte
+        MOVLW                ' '
+        CALL                USART_SendByte
+        MOVLW                'a'
+        CALL                USART_SendByte
+        MOVLW                ' '
+        CALL                USART_SendByte
+        MOVLW                'k'
+        CALL                USART_SendByte
+        MOVLW                'e'
+        CALL                USART_SendByte
+        MOVLW                'y'
+        CALL                USART_SendByte
+        MOVLW                ' '
+        CALL                USART_SendByte
+        MOVLW                't'
+        CALL                USART_SendByte
+        MOVLW                'o'
+        CALL                USART_SendByte
+        MOVLW                ' '
+        CALL                USART_SendByte
+        MOVLW                'l'
+        CALL                USART_SendByte
+        MOVLW                'o'
+        CALL                USART_SendByte
+        MOVLW                'a'
+        CALL                USART_SendByte
+        MOVLW                'd'
+        CALL                USART_SendByte
+        MOVLW                ' '
+        CALL                USART_SendByte
+        MOVLW                'E'
+        CALL                USART_SendByte
+        MOVLW                'E'
+        CALL                USART_SendByte
+        MOVLW                'P'
+        CALL                USART_SendByte
+        MOVLW                'R'
+        CALL                USART_SendByte
+        MOVLW                'O'
+        CALL                USART_SendByte
+        MOVLW                'M'
+        CALL                USART_SendByte
+        MOVLW                '.'
+        CALL                USART_SendByte
+
+
+LOOP:
+
+Delay:	MOVLW	50		    ; delay routine
+	MOVWF	D1		    ; nested loops
+Del1:	MOVLW	50		    ; 50 * 50 * 4 = 10,000
+	MOVWF	D2
+Del2:	MOVLW	4
+	MOVWF	D3
+Del3:	NOP
+	DECFSZ	D3, F
+	GOTO	Del3
+	DECFSZ	D2, F
+	GOTO	Del2
+	DECFSZ	D1, F
+	GOTO	Del1
+	RETURN
+
+        END
