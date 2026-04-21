@@ -33,8 +33,9 @@
 ; 1) initialize USART, initialize GPIO registers, and wait for a key
 ; 2) display a prompt 
 ; 3) load program into the EEPROM one byte at a time
-; 4) check the EEPROM to ensure the 
-;
+; 4) check the EEPROM to ensure the byte written was received
+; 5) write the next byte
+; 6) loop forever when all bytes have been written
 
 START:
         BCF                0x03, 6                        ; set memory bank 1
@@ -97,8 +98,11 @@ START:
         MOVLW                '.'
         CALL                USART_SendByte
 
+		CALL				USART_GetByte
+
 
 LOOP:
+		GOTO				LOOP
 
 Delay:	MOVLW	50		    ; delay routine
 	MOVWF	D1		    ; nested loops
