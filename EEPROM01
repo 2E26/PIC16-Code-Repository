@@ -20,6 +20,8 @@
                 D2
                 D3
                 Databyte
+				AddressL
+				AddressH
         ENDC
 
         ORG 0x0000
@@ -100,7 +102,6 @@ START:
 
 		CALL				USART_GetByte
 
-
 LOOP:
 		GOTO				LOOP
 
@@ -117,6 +118,20 @@ Del3:	NOP
 	GOTO	Del2
 	DECFSZ	D1, F
 	GOTO	Del1
+	RETURN
+
+EEPROM_SetAddress:
+	BCF	0x03, 5			; select bank 0
+	BCF	0x03, 6
+	MOVF	AddressL, 0		; grab the low byte of address stored in memory
+	MOVWF	0x06			; store it in PORTB
+	MOVF	AddressH, 0		; grab the high byte of address stored in memory
+	ANDLW	0x3F			; mask out the two highest bits
+	MOVWF	0x07			; store bits 0-5 in PORTC
+	BTFSC	AddressH, 6		; if bit 6 == 1
+	BSF	0x05, 0			; then make RA0 = 1
+	BTFSS	AddressH, 6		; else, if bit 6 == 0
+	BCF	0x05, 0			; then make RA0 = 0
 	RETURN
 
         END
