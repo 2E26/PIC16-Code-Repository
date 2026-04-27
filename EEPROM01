@@ -20,8 +20,9 @@
                 D2
                 D3
                 Databyte
-				AddressL
-				AddressH
+		AddressL
+		AddressH
+		Temp
         ENDC
 
         ORG 0x0000
@@ -38,13 +39,77 @@
 ; 4) check the EEPROM to ensure the byte written was received
 ; 5) write the next byte
 ; 6) loop forever when all bytes have been written
+;
+; File Register use
+;
+; PORTA(0): address bit A14
+; PORTB: address bits A0 - A7
+; PORTC(0-5): A8-A13
+; PORTD: data bus bits D0-D7
+; PORTE(0): Write Enable
+; PORTE(1): Chip Enable
+; PORTE(2): Output Enable
 
 START:
-        BCF                0x03, 6                        ; set memory bank 1
-        BSF                0x03, 5
-        CALL                USART_Init
-        CALL                Delay
-        CALL                USART_GetByte
+        BCF         0x03, 6	    ; set memory bank 1
+        BSF         0x03, 5
+	MOVLW	    0x00
+	MOVWF	    0x86	    ; set PortB to output
+	MOVWF	    0x88	    ; set PortD to output
+	MOVLW	    0x80	    ; set PortC to output except RC7
+	MOVWF	    0x87	    ; configure PORTC
+	MOVLW	    0x00	    ; set PortA to output
+	MOVWF	    0x85	    ; configure PortA
+	MOVLW	    0x00	    ; set PortE to output
+	MOVWF	    0x88	    ; configure PortE
+	BCF	    0x83, 6	    ; set memory bank 0
+	BCF	    0x83, 5
+	
+        CALL        USART_Init
+	CALL	    Delay
+	CALL	    EEPROM_StartMessage
+	CALL	    USART_GetByte
+	MOVLW	    0x00	    ; set starting address to 0x7E00
+	MOVWF	    AddressL
+	MOVLW	    0x7E	    ; which will be 0xFE00 in computer
+	MOVWF	    AddressH	    ; addressing
+	CALL	    EEPROM_SetAdress
+	
+	MOVLW	    
+
+LOOP:
+	GOTO	    LOOP
+
+Delay:	MOVLW	50		    ; delay routine
+	MOVWF	D1		    ; nested loops
+Del1:	MOVLW	50		    ; 50 * 50 * 4 = 10,000
+	MOVWF	D2
+Del2:	MOVLW	4
+	MOVWF	D3
+Del3:	NOP
+	DECFSZ	D3, F
+	GOTO	Del3
+	DECFSZ	D2, F
+	GOTO	Del2
+	DECFSZ	D1, F
+	GOTO	Del1
+	RETURN
+
+EEPROM_SetAddress:
+	BCF	0x03, 5			; select bank 0
+	BCF	0x03, 6
+	MOVF	AddressL, 0		; grab the low byte of address stored in memory
+	MOVWF	0x06			; store it in PORTB
+	MOVF	AddressH, 0		; grab the high byte of address stored in memory
+	ANDLW	0x3F			; mask out the two highest bits
+	MOVWF	0x07			; store bits 0-5 in PORTC
+	BTFSC	AddressH, 6		; if bit 6 == 1
+	BSF	0x05, 0			; then make RA0 = 1
+	BTFSS	AddressH, 6		; else, if bit 6 == 0
+	BCF	0x05, 0			; then make RA0 = 0
+	RETURN
+
+EEPROM_StartMessage:
         MOVLW                'P'
         CALL                USART_SendByte
         MOVLW                'r'
@@ -99,39 +164,31 @@ START:
         CALL                USART_SendByte
         MOVLW                '.'
         CALL                USART_SendByte
-
-		CALL				USART_GetByte
-
-LOOP:
-		GOTO				LOOP
-
-Delay:	MOVLW	50		    ; delay routine
-	MOVWF	D1		    ; nested loops
-Del1:	MOVLW	50		    ; 50 * 50 * 4 = 10,000
-	MOVWF	D2
-Del2:	MOVLW	4
-	MOVWF	D3
-Del3:	NOP
-	DECFSZ	D3, F
-	GOTO	Del3
-	DECFSZ	D2, F
-	GOTO	Del2
-	DECFSZ	D1, F
-	GOTO	Del1
 	RETURN
+	
+EEPROM_WriteMessage:
+        MOVLW                'W'
+        CALL                USART_SendByte
+        MOVLW                'r'
+        CALL                USART_SendByte
+        MOVLW                'o'
+        CALL                USART_SendByte
+        MOVLW                't'
+        CALL                USART_SendByte
+        MOVLW                'e'
+        CALL                USART_SendByte
+        MOVLW                ' '
+        CALL                USART_SendByte
+        MOVLW                'b'
+        CALL                USART_SendByte
+        MOVLW                'y'
+        CALL                USART_SendByte
+        MOVLW                't'
+        CALL                USART_SendByte
+        MOVLW                'e'
+        CALL                USART_SendByte
+        MOVLW                ' '
+        CALL                USART_SendByte
 
-EEPROM_SetAddress:
-	BCF	0x03, 5			; select bank 0
-	BCF	0x03, 6
-	MOVF	AddressL, 0		; grab the low byte of address stored in memory
-	MOVWF	0x06			; store it in PORTB
-	MOVF	AddressH, 0		; grab the high byte of address stored in memory
-	ANDLW	0x3F			; mask out the two highest bits
-	MOVWF	0x07			; store bits 0-5 in PORTC
-	BTFSC	AddressH, 6		; if bit 6 == 1
-	BSF	0x05, 0			; then make RA0 = 1
-	BTFSS	AddressH, 6		; else, if bit 6 == 0
-	BCF	0x05, 0			; then make RA0 = 0
-	RETURN
-
+	
         END
