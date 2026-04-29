@@ -61,11 +61,27 @@ START:
 	MOVLW	    0x00	    ; set PortA to output
 	MOVWF	    0x85	    ; configure PortA
 	MOVLW	    0x00	    ; set PortE to output
-	MOVWF	    0x88	    ; configure PortE
+	MOVWF	    0x89	    ; configure PortE
 	BCF	    0x83, 6	    ; set memory bank 0
 	BCF	    0x83, 5
-	
-        CALL        USART_Init
+	BSF		0x09, 2		; PORTE /OE high
+	BSF		0x09, 1		; PORTE /CE high
+	BSF		0x09, 0		; PORTE /WE high
+
+	; now, write the following program to EEPROM starting at 0x7E00
+	; which will show up in computer memory 0xFE00
+	; 0xA9018D0002A9058D0102A9088D02024C00FE
+	;
+	; start:
+	; LDA	$01
+	; STA	$0200
+	; LDA	$05
+	; STA	$0201
+	; LDA	$08
+	; STA	$0202
+	; JMP	start
+
+    CALL        USART_Init
 	CALL	    Delay
 	CALL	    EEPROM_StartMessage
 	CALL	    USART_GetByte
@@ -74,8 +90,10 @@ START:
 	MOVLW	    0x7E	    ; which will be 0xFE00 in computer
 	MOVWF	    AddressH	    ; addressing
 	CALL	    EEPROM_SetAdress
-	
-	MOVLW	    
+
+	MOVLW	    A9
+	MOVWF		Databyte
+	CALL		EEPROM_WriteByte
 
 LOOP:
 	GOTO	    LOOP
@@ -194,5 +212,18 @@ EEPROM_WriteMessage:
         MOVLW                ' '
         CALL                USART_SendByte
 
+EEPROM_WriteByte:
+		MOVF				Databyte, 0			; take the data to be written
+		MOVWF				0x08				; write it to port D
+		BCF					0x09, 1				; /CE low
+		NOP
+		NOP
+		BCF					0x09, 0				; /WE low
+		NOP
+		NOP
+		BSF					0x09, 1				; /CE, /WE high
+		BSFT				0x09, 0
+		CALL				Delay
+		RETURN
 	
         END
