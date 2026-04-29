@@ -211,6 +211,10 @@ EEPROM_WriteMessage:
         CALL                USART_SendByte
         MOVLW                ' '
         CALL                USART_SendByte
+		MOVF				Databyte, 0
+		CALL				PrintBytetoChar
+		
+		RETURN
 
 EEPROM_WriteByte:
 		MOVF				Databyte, 0			; take the data to be written
@@ -225,5 +229,8 @@ EEPROM_WriteByte:
 		BSF					0x09, 0
 		CALL				Delay
 		RETURN
+
+PrintBytetoChar:
+		ANDLW				0x0F
 	
         END
