@@ -23,6 +23,7 @@
 		AddressL
 		AddressH
 		Temp
+		Temp2
         ENDC
 
         ORG 0x0000
@@ -219,6 +220,7 @@ EEPROM_WriteMessage:
 EEPROM_WriteByte:
 		MOVF				Databyte, 0			; take the data to be written
 		MOVWF				0x08				; write it to port D
+		BSF
 		BCF					0x09, 1				; /CE low
 		NOP
 		NOP
@@ -231,9 +233,31 @@ EEPROM_WriteByte:
 		RETURN
 
 PrintBytetoChar:
-		ANDLW				0xF0
-		RR
+		MOVWF				Temp				; save W in a temporary byte
+		SWAPF				Temp, 0				; write the same byte back to W with nibbles reversed
+		ANDLW				0x0F				; strike off top four bytes
+		MOVWF				Temp2
+		SUBLW				0X09				; subtract 9
+		BTFSS				0x03, 0				; check if carry flag is set. If so, W <= 9
+		GOTO				Letter				; 
+Number:	MOVF				Temp2, 0			; restore original nibble
+		ADDLW				0x30				; add 30h to convert numerical digit to ASCII character (0-9)
+		GOTO				CharPt				;
+Letter: MOVF				Temp2, 0			; restore original nibble
+		ADDLW				0x37				; add 37h to convert numerical digit to ASCII character (A-F)
+CharPt: CALL				USART_SendByte		; send the high character to the serial port
+		MOVF				Temp, 0				; get the original value of W back in original order
+		ANDLW				0x0F				; strip off four bytes
+		MOVWF				Temp2				; save nibble
+		SUBLW				0x09				; W = 9 - W
+		BTFSS				0x03, 0				; if result < 0 then handle numerical digit
+		GOTO				Ltr2				; 
+Num2:	MOVF				Temp2, 0			; restore original nibble
+		ADDLW				0x30				; add 30h to convert to ASCII
+		GOTO				ChrPt2				;
+Ltr2:	MOVF				Temp2, 0			; restore original nibble
+		ADDLW				0x37				; add 37h to convert to ASCII
+ChrPt2:	CALL				USART_SendByte		; print low character to serial port
 		RETURN
 		
-	
         END
