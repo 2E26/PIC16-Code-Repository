@@ -95,6 +95,7 @@ START:
 	MOVLW	    0xA9
 	MOVWF		Databyte
 	CALL		EEPROM_WriteByte
+	CALL		EEPROM_WriteMessage
 
 LOOP:
 	GOTO	    LOOP
@@ -212,9 +213,48 @@ EEPROM_WriteMessage:
         CALL                USART_SendByte
         MOVLW                ' '
         CALL                USART_SendByte
+		MOVLW				'0'
+		CALL				USART_SendByte
+		MOVLW				'x'
+		CALL				USART_SendByte
 		MOVF				Databyte, 0
 		CALL				PrintBytetoChar
-		
+		MOVLW				' '
+		CALL				USART_SendByte
+		MOVLW				't'
+		CALL				USART_SendByte
+		MOVLW				'o'
+		CALL				USART_SendByte
+		MOVLW				' '
+		CALL				USART_SendByte
+		MOVLW				'a'
+		CALL				USART_SendByte
+		MOVLW				'd'
+		CALL				USART_SendByte
+		MOVLW				'd'
+		CALL				USART_SendByte
+		MOVLW				'r'
+		CALL				USART_SendByte
+		MOVLW				'e'
+		CALL				USART_SendByte
+		MOVLW				's'
+		CALL				USART_SendByte
+		MOVLW				's'
+		CALL				USART_SendByte
+		MOVLW				' '
+		CALL				USART_SendByte
+		MOVLW				'0'
+		CALL				USART_SendByte
+		MOVLW				'x'
+		CALL				USART_SendByte
+		MOVF				AddressL, 0
+		CALL				PrintBytetoChar
+		MOVF				AddressH, 0
+		CALL				PrintBytetoChar
+		MOVLW				0x0D
+		CALL				USART_SendByte
+		MOVLW				0x0A
+		CALL				USART_SendByte
 		RETURN
 
 EEPROM_WriteByte:
