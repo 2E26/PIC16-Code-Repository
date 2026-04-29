@@ -100,9 +100,13 @@ EEPROM_SetAddress:
 	BCF	0x03, 6
 	MOVF	AddressL, 0		; grab the low byte of address stored in memory
 	MOVWF	0x06			; store it in PORTB
+	MOVF	0x07, 0			; store PORTC in W
+	ANDLW	0xC0			; clear out all but the two high bits
+	MOVWF	Temp			; and store it in memory
 	MOVF	AddressH, 0		; grab the high byte of address stored in memory
 	ANDLW	0x3F			; mask out the two highest bits
-	MOVWF	0x07			; store bits 0-5 in PORTC
+	IORWF	Temp			; restore the two high bits originally in PORTC
+	MOVWF	0x07			; write the address to PORTC 0-5, preserving TX/RX bits
 	BTFSC	AddressH, 6		; if bit 6 == 1
 	BSF	0x05, 0			; then make RA0 = 1
 	BTFSS	AddressH, 6		; else, if bit 6 == 0
