@@ -123,7 +123,7 @@ EEPROM_SetAddress:
 	MOVWF	Temp			; and store it in memory
 	MOVF	AddressH, 0		; grab the high byte of address stored in memory
 	ANDLW	0x3F			; mask out the two highest bits
-	IORWF	Temp			; restore the two high bits originally in PORTC
+	IORWF	Temp, 0			; restore the two high bits originally in PORTC
 	MOVWF	0x07			; write the address to PORTC 0-5, preserving TX/RX bits
 	BTFSC	AddressH, 6		; if bit 6 == 1
 	BSF	0x05, 0			; then make RA0 = 1
