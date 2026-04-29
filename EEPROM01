@@ -73,11 +73,11 @@ START:
 	; 0xA9018D0002A9058D0102A9088D02024C00FE
 	;
 	; start:
-	; LDA	$01
+	; LDA	#$01
 	; STA	$0200
-	; LDA	$05
+	; LDA	#$05
 	; STA	$0201
-	; LDA	$08
+	; LDA	#$08
 	; STA	$0202
 	; JMP	start
 
@@ -231,6 +231,9 @@ EEPROM_WriteByte:
 		RETURN
 
 PrintBytetoChar:
-		ANDLW				0x0F
+		ANDLW				0xF0
+		RR
+		RETURN
+		
 	
         END
