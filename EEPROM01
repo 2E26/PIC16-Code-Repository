@@ -127,10 +127,28 @@ EEPROM_SetAddress:
 	ANDLW	0x3F			; mask out the two highest bits
 	IORWF	Temp, 0			; restore the two high bits originally in PORTC
 	MOVWF	0x07			; write the address to PORTC 0-5, preserving TX/RX bits
-	BTFSC	AddressH, 6		; if bit 6 == 1
-	BSF	0x05, 0			; then make RA0 = 1
-	BTFSS	AddressH, 6		; else, if bit 6 == 0
+	BSF	0x05, 0			; make RA0 = 1
+	BTFSS	AddressH, 6		; if bit is supposed to be 0
 	BCF	0x05, 0			; then make RA0 = 0
+	RETURN
+
+EEPROM_IncrementAddress:
+	INCFSZ					AddressL, 1
+	GOTO					NoOverflowL
+	INCF					AddressH, 1
+NoOverflowL:
+	MOVF					AddressL, 0
+	MOVWF					0x06
+	MOVF					0x07, 0
+	ANDLW					0xC0
+	MOVWF					Temp
+	MOVF					AddressH, 0
+	ANDLW					0x3F
+	IORWF					Temp, 0
+	MOVWF					0x07
+	BSF						0x05, 0
+	BTFSS					AddressH, 6
+	BCF						0x05, 0
 	RETURN
 
 EEPROM_StartMessage:
@@ -260,7 +278,7 @@ EEPROM_WriteMessage:
 EEPROM_WriteByte:
 		MOVF				Databyte, 0			; take the data to be written
 		MOVWF				0x08				; write it to port D
-		BSF
+		BSF					0x09, 2				; ensure /OE is high
 		BCF					0x09, 1				; /CE low
 		NOP
 		NOP
@@ -275,7 +293,7 @@ EEPROM_WriteByte:
 PrintBytetoChar:
 		MOVWF				Temp				; save W in a temporary byte
 		SWAPF				Temp, 0				; write the same byte back to W with nibbles reversed
-		ANDLW				0x0F				; strike off top four bytes
+		ANDLW				0x0F				; strike off top four bits
 		MOVWF				Temp2
 		SUBLW				0X09				; subtract 9
 		BTFSS				0x03, 0				; check if carry flag is set. If so, W <= 9
@@ -287,7 +305,7 @@ Letter: MOVF				Temp2, 0			; restore original nibble
 		ADDLW				0x37				; add 37h to convert numerical digit to ASCII character (A-F)
 CharPt: CALL				USART_SendByte		; send the high character to the serial port
 		MOVF				Temp, 0				; get the original value of W back in original order
-		ANDLW				0x0F				; strip off four bytes
+		ANDLW				0x0F				; strip off four bits
 		MOVWF				Temp2				; save nibble
 		SUBLW				0x09				; W = 9 - W
 		BTFSS				0x03, 0				; if result < 0 then handle numerical digit
