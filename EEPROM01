@@ -89,9 +89,9 @@ START:
 	MOVWF	    AddressL
 	MOVLW	    0x7E	    ; which will be 0xFE00 in computer
 	MOVWF	    AddressH	    ; addressing
-	CALL	    EEPROM_SetAdress
+	CALL	    EEPROM_SetAddress
 
-	MOVLW	    A9
+	MOVLW	    0xA9
 	MOVWF		Databyte
 	CALL		EEPROM_WriteByte
 
@@ -222,7 +222,7 @@ EEPROM_WriteByte:
 		NOP
 		NOP
 		BSF					0x09, 1				; /CE, /WE high
-		BSFT				0x09, 0
+		BSF					0x09, 0
 		CALL				Delay
 		RETURN
 	
