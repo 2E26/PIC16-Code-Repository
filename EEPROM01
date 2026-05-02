@@ -24,6 +24,9 @@
 		AddressH
 		Temp
 		Temp2
+		MsgIndex
+		DataIndex
+		ProgStatus
         ENDC
 
         ORG 0x0000
@@ -52,23 +55,25 @@
 ; PORTE(2): Output Enable
 
 START:
-        BCF         0x03, 6	    ; set memory bank 1
-        BSF         0x03, 5
-	MOVLW	    0x00
-	MOVWF	    0x86	    ; set PortB to output
-	MOVWF	    0x88	    ; set PortD to output
-	MOVLW	    0x80	    ; set PortC to output except RC7
-	MOVWF	    0x87	    ; configure PORTC
-	MOVLW	    0x00	    ; set PortA to output
-	MOVWF	    0x85	    ; configure PortA
-	MOVLW	    0x00	    ; set PortE to output
-	MOVWF	    0x89	    ; configure PortE
-	BCF	    0x83, 6	    ; set memory bank 0
-	BCF	    0x83, 5
-	BSF		0x09, 2		; PORTE /OE high
-	BSF		0x09, 1		; PORTE /CE high
-	BSF		0x09, 0		; PORTE /WE high
-
+        BCF		0x03, 6	    ; set memory bank 1
+        BSF		0x03, 5
+	MOVLW		0x00
+	MOVWF		0x86	    ; set PortB to output
+	MOVWF		0x88	    ; set PortD to output
+	MOVLW		0x80	    ; set PortC to output except RC7
+	MOVWF		0x87	    ; configure PORTC
+	MOVLW		0x00	    ; set PortA to output
+	MOVWF		0x85	    ; configure PortA
+	MOVLW		0x00	    ; set PortE to output
+	MOVWF		0x89	    ; configure PortE
+	MOVLW		0x06	    ; configure ADCON1
+	MOVWF		0x9F	    ; all A/D ports are digital ports
+	BCF		0x83, 6	    ; set memory bank 0
+	BCF		0x83, 5
+	BSF		0x09, 0	    ; set control bits /CE, /WE, /OE
+	BSF		0x09, 1	    ; all high for starters
+	BSF		0x09, 2
+	
 	; now, write the following program to EEPROM starting at 0x7E00
 	; which will show up in computer memory 0xFE00
 	; 0xA9018D0002A9058D0102A9088D02024C00FE
@@ -81,40 +86,100 @@ START:
 	; LDA	#$08
 	; STA	$0202
 	; JMP	start
-
-    CALL        USART_Init
-	CALL	    Delay
-	CALL	    EEPROM_StartMessage
-	CALL	    USART_GetByte
-	MOVLW	    0x00	    ; set starting address to 0x7E00
-	MOVWF	    AddressL
-	MOVLW	    0x7E	    ; which will be 0xFE00 in computer
-	MOVWF	    AddressH	    ; addressing
-	CALL	    EEPROM_SetAddress
-
-	MOVLW	    0xA9
-	MOVWF		Databyte
-	CALL		EEPROM_WriteByte
-	CALL		EEPROM_WriteMessage
-
+	
+        CALL		USART_Init
+	CALL		Delay
+	CALL		EEPROM_StartMessage
+	CALL		USART_GetByte
+	MOVLW		0x00	    ; set starting address to 0x7E00
+	MOVWF		AddressL
+	MOVLW		0x7E	    ; which will be 0xFE00 in computer
+	MOVWF		AddressH    ; addressing
+	CALL		EEPROM_SetAddress
+	
+	CLRF		DataIndex   ; Data Index = 0
+	
+LoadLoop:
+    
+	; this routine reads a byte from a repository of program data and places
+	; it on the EEPROM chip. It then writes a message stating what byte was
+	; written to what address on the chip. 
+    
+	MOVF		DataIndex, 0	    ; W = Data Index
+	CALL		EEPROM_LoadData	    ; get a byte from the list
+	MOVWF		DataByte
+	CALL		EEPROM_WriteByte    ; write it to the EEPROM
+	CALL		EEPROM_WriteMessage ; place text in the serial port
+	MOVF		Databyte, 0	    ; W = Databyte
+	CALL		PrintBytetoChar	    ; print ASCII version of W
+	CALL		EEPROM_WriteMsg2    ; place text in the serial port
+	MOVF		AddressH, 0	    ; W = high address byte
+	CALL		PrintBytetoChar	    ; print ASCII address high
+	MOVF		AddressL, 0	    ; W = low address byte
+	CALL		PrintBytetoChar	    ; print ASCII address low
+	CALL		USART_SendCRLF	    ; send 0x0D0A to serial port
+	CALL		EEPROM_IncrementAddress
+	INCF		DataIndex, F	    ; Data Index ++
+	MOVF		DataIndex, 0
+	XORLW		0x12		    ; Is W > 17?
+	BTFSC		0x03, 2		    ; If zero flag is set...
+	GOTO		VectorLoad	    ; go to next part of loop
+	GOTO		LoadLoop	    ; go back to do it again
+	
+VectorLoad:
+	CLRF		DataIndex
+	MOVLW		0xFA
+	MOVWF		AddressL
+	MOVLW		0xFF
+	MOVWF		AddressH
+	CALL		EEPROM_SetAddress
+	    
 LOOP:
-	GOTO	    LOOP
+	GOTO		LOOP
 
-Delay:	MOVLW	50		    ; delay routine
-	MOVWF	D1		    ; nested loops
-Del1:	MOVLW	50		    ; 50 * 50 * 4 = 10,000
-	MOVWF	D2
-Del2:	MOVLW	4
-	MOVWF	D3
+Delay:	MOVLW		50		; delay routine
+	MOVWF		D1	        ; nested loops
+Del1:	MOVLW		50		; 50 * 50 * 4 = 10,000
+	MOVWF		D2
+Del2:	MOVLW		4
+	MOVWF		D3
 Del3:	NOP
-	DECFSZ	D3, F
-	GOTO	Del3
-	DECFSZ	D2, F
-	GOTO	Del2
-	DECFSZ	D1, F
-	GOTO	Del1
+	DECFSZ		D3, F
+	GOTO		Del3
+	DECFSZ		D2, F
+	GOTO		Del2
+	DECFSZ		D1, F
+	GOTO		Del1
 	RETURN
-
+	
+PrintBytetoChar:
+	MOVWF		Temp		; save W in a temporary byte
+	SWAPF		Temp, 0		; write the same byte back to W with nibbles reversed
+	ANDLW		0x0F		; strike off top four bits
+	MOVWF		Temp2
+	SUBLW		0X09		; subtract 9
+	BTFSS		0x03, 0		; check if carry flag is set. If so, W <= 9
+	GOTO		Letter		; 
+Number:	MOVF		Temp2, 0	; restore original nibble
+	ADDLW		0x30		; add 30h to convert numerical digit to ASCII character (0-9)
+	GOTO		CharPt		;
+Letter: MOVF		Temp2, 0	; restore original nibble
+	ADDLW		0x37		; add 37h to convert numerical digit to ASCII character (A-F)
+CharPt: CALL		USART_SendByte	; send the high character to the serial port
+	MOVF		Temp, 0		; get the original value of W back in original order
+	ANDLW		0x0F		; strip off four bits
+	MOVWF		Temp2		; save nibble
+	SUBLW		0x09		; W = 9 - W
+	BTFSS		0x03, 0		; if result < 0 then handle numerical digit
+	GOTO		Ltr2		; 
+Num2:	MOVF		Temp2, 0	; restore original nibble
+	ADDLW		0x30		; add 30h to convert to ASCII
+	GOTO		ChrPt2		;
+Ltr2:	MOVF		Temp2, 0	; restore original nibble
+	ADDLW		0x37		; add 37h to convert to ASCII
+ChrPt2:	CALL		USART_SendByte	; print low character to serial port
+	RETURN
+		
 EEPROM_SetAddress:
 	BCF	0x03, 5			; select bank 0
 	BCF	0x03, 6
@@ -133,189 +198,157 @@ EEPROM_SetAddress:
 	RETURN
 
 EEPROM_IncrementAddress:
-	INCFSZ					AddressL, 1
-	GOTO					NoOverflowL
-	INCF					AddressH, 1
+	INCFSZ		AddressL, 1
+	GOTO		NoOverflowL
+	INCFSZ		AddressH, 1
+	GOTO		NoOverflowL
+	GOTO		OverflowH
 NoOverflowL:
-	MOVF					AddressL, 0
-	MOVWF					0x06
-	MOVF					0x07, 0
-	ANDLW					0xC0
-	MOVWF					Temp
-	MOVF					AddressH, 0
-	ANDLW					0x3F
-	IORWF					Temp, 0
-	MOVWF					0x07
-	BSF						0x05, 0
-	BTFSS					AddressH, 6
-	BCF						0x05, 0
+	CALL		EEPROM_SetAddress
 	RETURN
-
-EEPROM_StartMessage:
-        MOVLW                'P'
-        CALL                USART_SendByte
-        MOVLW                'r'
-        CALL                USART_SendByte
-        MOVLW                'e'
-        CALL                USART_SendByte
-        MOVLW                's'
-        CALL                USART_SendByte
-        MOVLW                's'
-        CALL                USART_SendByte
-        MOVLW                ' '
-        CALL                USART_SendByte
-        MOVLW                'a'
-        CALL                USART_SendByte
-        MOVLW                ' '
-        CALL                USART_SendByte
-        MOVLW                'k'
-        CALL                USART_SendByte
-        MOVLW                'e'
-        CALL                USART_SendByte
-        MOVLW                'y'
-        CALL                USART_SendByte
-        MOVLW                ' '
-        CALL                USART_SendByte
-        MOVLW                't'
-        CALL                USART_SendByte
-        MOVLW                'o'
-        CALL                USART_SendByte
-        MOVLW                ' '
-        CALL                USART_SendByte
-        MOVLW                'l'
-        CALL                USART_SendByte
-        MOVLW                'o'
-        CALL                USART_SendByte
-        MOVLW                'a'
-        CALL                USART_SendByte
-        MOVLW                'd'
-        CALL                USART_SendByte
-        MOVLW                ' '
-        CALL                USART_SendByte
-        MOVLW                'E'
-        CALL                USART_SendByte
-        MOVLW                'E'
-        CALL                USART_SendByte
-        MOVLW                'P'
-        CALL                USART_SendByte
-        MOVLW                'R'
-        CALL                USART_SendByte
-        MOVLW                'O'
-        CALL                USART_SendByte
-        MOVLW                'M'
-        CALL                USART_SendByte
-        MOVLW                '.'
-        CALL                USART_SendByte
-	RETURN
-	
-EEPROM_WriteMessage:
-        MOVLW                'W'
-        CALL                USART_SendByte
-        MOVLW                'r'
-        CALL                USART_SendByte
-        MOVLW                'o'
-        CALL                USART_SendByte
-        MOVLW                't'
-        CALL                USART_SendByte
-        MOVLW                'e'
-        CALL                USART_SendByte
-        MOVLW                ' '
-        CALL                USART_SendByte
-        MOVLW                'b'
-        CALL                USART_SendByte
-        MOVLW                'y'
-        CALL                USART_SendByte
-        MOVLW                't'
-        CALL                USART_SendByte
-        MOVLW                'e'
-        CALL                USART_SendByte
-        MOVLW                ' '
-        CALL                USART_SendByte
-		MOVLW				'0'
-		CALL				USART_SendByte
-		MOVLW				'x'
-		CALL				USART_SendByte
-		MOVF				Databyte, 0
-		CALL				PrintBytetoChar
-		MOVLW				' '
-		CALL				USART_SendByte
-		MOVLW				't'
-		CALL				USART_SendByte
-		MOVLW				'o'
-		CALL				USART_SendByte
-		MOVLW				' '
-		CALL				USART_SendByte
-		MOVLW				'a'
-		CALL				USART_SendByte
-		MOVLW				'd'
-		CALL				USART_SendByte
-		MOVLW				'd'
-		CALL				USART_SendByte
-		MOVLW				'r'
-		CALL				USART_SendByte
-		MOVLW				'e'
-		CALL				USART_SendByte
-		MOVLW				's'
-		CALL				USART_SendByte
-		MOVLW				's'
-		CALL				USART_SendByte
-		MOVLW				' '
-		CALL				USART_SendByte
-		MOVLW				'0'
-		CALL				USART_SendByte
-		MOVLW				'x'
-		CALL				USART_SendByte
-		MOVF				AddressL, 0
-		CALL				PrintBytetoChar
-		MOVF				AddressH, 0
-		CALL				PrintBytetoChar
-		MOVLW				0x0D
-		CALL				USART_SendByte
-		MOVLW				0x0A
-		CALL				USART_SendByte
-		RETURN
+OverflowH:
+	GOTO		OverflowH	; for now, just loop forever if broken
 
 EEPROM_WriteByte:
-		MOVF				Databyte, 0			; take the data to be written
-		MOVWF				0x08				; write it to port D
-		BSF					0x09, 2				; ensure /OE is high
-		BCF					0x09, 1				; /CE low
-		NOP
-		NOP
-		BCF					0x09, 0				; /WE low
-		NOP
-		NOP
-		BSF					0x09, 1				; /CE, /WE high
-		BSF					0x09, 0
-		CALL				Delay
-		RETURN
+	MOVF		Databyte, 0	; take the data to be written
+	MOVWF		0x08		; write it to port D
+	BSF		0x09, 2		; ensure /OE is high
+	BCF		0x09, 1		; /CE low
+	NOP
+	NOP
+	BCF		0x09, 0		; /WE low
+	NOP
+	NOP
+	BSF		0x09, 1		; /CE, /WE high
+	BSF		0x09, 0
+	CALL		Delay
+	RETURN	
+	
+EEPROM_StartMessage:
+        CLRF		MsgIndex
+EEPROM_StartMsgLoop:
+	MOVF		MsgIndex, W
+	CALL		EEPROM_StartMsgStrt
+	XORLW		0x00
+	BTFSC		0x03, 2
+	RETURN
+	CALL		USART_SendByte
+	INCF		MsgIndex, F
+	GOTO		EEPROM_StartMsgLoop
+EEPROM_StartMsgStrt:
+	ADDWF		PCL, F
+        RETLW           'P'
+        RETLW           'r'
+        RETLW           'e'
+        RETLW           's'
+        RETLW           's'
+        RETLW           ' '
+        RETLW           'a'
+        RETLW           ' '
+        RETLW           'k'
+        RETLW           'e'
+        RETLW		'y'
+        RETLW           ' '
+        RETLW           't'
+        RETLW           'o'
+        RETLW           ' '
+        RETLW           'l'
+        RETLW           'o'
+        RETLW           'a'
+        RETLW           'd'
+        RETLW           ' '
+        RETLW           'E'
+        RETLW           'E'
+        RETLW           'P'
+        RETLW           'R'
+        RETLW           'O'
+        RETLW           'M'
+        RETLW           '.'
+	RETLW		0x0D
+	RETLW		0x0A
+	RETLW		0x00
 
-PrintBytetoChar:
-		MOVWF				Temp				; save W in a temporary byte
-		SWAPF				Temp, 0				; write the same byte back to W with nibbles reversed
-		ANDLW				0x0F				; strike off top four bits
-		MOVWF				Temp2
-		SUBLW				0X09				; subtract 9
-		BTFSS				0x03, 0				; check if carry flag is set. If so, W <= 9
-		GOTO				Letter				; 
-Number:	MOVF				Temp2, 0			; restore original nibble
-		ADDLW				0x30				; add 30h to convert numerical digit to ASCII character (0-9)
-		GOTO				CharPt				;
-Letter: MOVF				Temp2, 0			; restore original nibble
-		ADDLW				0x37				; add 37h to convert numerical digit to ASCII character (A-F)
-CharPt: CALL				USART_SendByte		; send the high character to the serial port
-		MOVF				Temp, 0				; get the original value of W back in original order
-		ANDLW				0x0F				; strip off four bits
-		MOVWF				Temp2				; save nibble
-		SUBLW				0x09				; W = 9 - W
-		BTFSS				0x03, 0				; if result < 0 then handle numerical digit
-		GOTO				Ltr2				; 
-Num2:	MOVF				Temp2, 0			; restore original nibble
-		ADDLW				0x30				; add 30h to convert to ASCII
-		GOTO				ChrPt2				;
-Ltr2:	MOVF				Temp2, 0			; restore original nibble
-		ADDLW				0x37				; add 37h to convert to ASCII
-ChrPt2:	CALL				USART_SendByte		; print low character to serial port
-		RETURN
-		
-        END
+EEPROM_WriteMessage:
+        CLRF		MsgIndex
+EEPROM_WriteMsgLoop:
+	MOVF		MsgIndex, W
+	CALL		EEPROM_WriteMsgStrt
+	XORLW		0x00
+	BTFSC		0x03, 2
+	RETURN
+	CALL		USART_SendByte
+	INCF		MsgIndex, F
+	GOTO		EEPROM_WriteMsgLoop	
+EEPROM_WriteMsgStrt:
+	ADDWF		PCL, F
+        RETLW           'W'
+        RETLW           'r'
+        RETLW           'o'
+        RETLW           't'
+        RETLW           'e'
+        RETLW           ' '
+        RETLW           'b'
+        RETLW           'y'
+        RETLW           't'
+        RETLW           'e'
+        RETLW           ' '
+	RETLW		0x00
+
+EEPROM_WriteMsg2:
+        CLRF		MsgIndex		; message index = 0
+EEPROM_WriteMsg2Loop:
+	MOVF		MsgIndex, W		; W = message index
+	CALL		EEPROM_WriteMsg2Strt	; grab character Msg2[indx]
+	XORLW		0x00			; is Msg2[indx] == 0x00?
+    	BTFSC		0x03, 2			; if Z flag set, then exit
+	RETURN
+	CALL		USART_SendByte		; otherwise, send byte
+	INCF		MsgIndex, F		; message index += 1
+	GOTO		EEPROM_WriteMsg2Loop	; repeat routine
+EEPROM_WriteMsg2Strt:
+	ADDWF		PCL, F
+        RETLW           ' '
+        RETLW           't'
+        RETLW           'o'
+        RETLW           ' '
+        RETLW           'a'
+        RETLW           'd'
+        RETLW           'd'
+        RETLW           'r'
+        RETLW           'e'
+        RETLW           's'
+        RETLW           's'
+	RETLW		' '
+	RETLW		0x00	
+	
+EEPROM_LoadData:
+	ADDWF		PCL, F		; add W to the program counter
+	RETLW		0xA9		; 0xFE00    LDA
+	RETLW		0x01		; 0xFE01    #$01
+	RETLW		0x8D		; 0xFE02    STA
+	RETLW		0x00		; 0xFE03    $00
+	RETLW		0x02		; 0xFE04    $02
+	RETLW		0xA9		; 0xFE05    LDA
+	RETLW		0x05		; 0xFE06    #$05
+	RETLW		0x8D		; 0xFE07    STA
+	RETLW		0x01		; 0xFE08    $01
+	RETLW		0x02		; 0xFE09    $02
+	RETLW		0xA9		; 0xFE0A    LDA
+	RETLW		0x08		; 0xFE0B    #$08
+	RETLW		0x8D		; 0xFE0C    STA
+	RETLW		0x02		; 0xFE0D    $02
+	RETLW		0x02		; 0xFE0E    $02
+	RETLW		0x4C		; 0xFE0F    JMP
+	RETLW		0x00		; 0xFE10    $00
+	RETLW		0xFE		; 0xFE11    $FE
+	
+EEPROM_Vectors:
+	ADDWF		PCL, F
+	RETLW		0x00		; 0xFFFA
+	RETLW		0xFE		; 0xFFFB
+	RETLW		0x00		; 0xFFFC
+	RETLW		0xFE		; 0xFFFD
+	RETLW		0x00		; 0xFFFE
+	RETLW		0xFE		; 0xFFFF
+
+	END
