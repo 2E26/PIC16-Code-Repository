@@ -40,8 +40,8 @@
 ; 1) initialize USART, initialize GPIO registers, and wait for a key
 ; 2) display a prompt 
 ; 3) load program into the EEPROM one byte at a time
-; 4) check the EEPROM to ensure the byte written was received
-; 5) write the next byte
+; 4) increment address and write another byte
+; 5) once all bytes have been written, read all bytes and ensure they match
 ; 6) loop forever when all bytes have been written
 ;
 ; File Register use
@@ -70,7 +70,7 @@ START:
 	MOVWF		0x9F	    ; all A/D ports are digital ports
 	BCF		0x83, 6	    ; set memory bank 0
 	BCF		0x83, 5
-	BSF		0x09, 0	    ; set control bits /CE, /WE, /OE
+	BSF		0x09, 0	    ; set control bits /WE, /CE, /OE
 	BSF		0x09, 1	    ; all high for starters
 	BSF		0x09, 2
 	
@@ -121,7 +121,7 @@ LoadLoop:
 	CALL		EEPROM_IncrementAddress
 	INCF		DataIndex, F	    ; Data Index ++
 	MOVF		DataIndex, 0
-	XORLW		0x12		    ; Is W > 17?
+	XORLW		0x12		    ; Is W > 5?
 	BTFSC		0x03, 2		    ; If zero flag is set...
 	GOTO		VectorLoad	    ; go to next part of loop
 	GOTO		LoadLoop	    ; go back to do it again
@@ -130,11 +130,56 @@ VectorLoad:
 	CLRF		DataIndex
 	MOVLW		0xFA
 	MOVWF		AddressL
-	MOVLW		0xFF
+	MOVLW		0x7F
 	MOVWF		AddressH
 	CALL		EEPROM_SetAddress
-	    
+	
+VectorLoop:
+	MOVF		DataIndex, 0	    ; W = Data Index
+	CALL		EEPROM_Vectors	    ; get a byte from the list
+	MOVWF		DataByte
+	CALL		EEPROM_WriteByte    ; write it to the EEPROM
+	CALL		EEPROM_WriteMessage ; place text in the serial port
+	MOVF		Databyte, 0	    ; W = Databyte
+	CALL		PrintBytetoChar	    ; print ASCII version of W
+	CALL		EEPROM_WriteMsg2    ; place text in the serial port
+	MOVF		AddressH, 0	    ; W = high address byte
+	CALL		PrintBytetoChar	    ; print ASCII address high
+	MOVF		AddressL, 0	    ; W = low address byte
+	CALL		PrintBytetoChar	    ; print ASCII address low
+	CALL		USART_SendCRLF	    ; send 0x0D0A to serial port
+	CALL		EEPROM_IncrementAddress
+	INCF		DataIndex, F	    ; Data Index ++
+	MOVF		DataIndex, 0
+	XORLW		0x06		    ; Is W > 17?
+	BTFSC		0x03, 2		    ; If zero flag is set...
+	GOTO		VerifyCode	    ; go to next part of loop
+	GOTO		VectorLoop	    ; go back to do it again
+	
+VerifyCode:
+	CALL		Delay		    ; give hardware a chance to catch up
+	CLRF		DataIndex	    ; set data reading counter to zero	
+	MOVLW		0x00		    ; set address to the beginning
+	MOVWF		AddressL
+	MOVLW		0x7E
+	MOVWF		AddressH
+	CALL		EEPROM_SetAddress
+	BCF		0x03, 6		    ; set PORTD to input
+	BSF		0x03, 5		    ; TRISB is in bank 1
+	MOVLW		0xFF		    ; all eight bits of D are input
+	MOVWF		0x88
+	BCF		0x03, 6		    ; return to bank 0
+	BCF		0x03, 5
+VerifyLoop:
+	CALL		EEPROM_ReadByte	    ; Store a byte in W
+	MOVWF		DataByte
+	MOVF		DataIndex, 0	    ; W = DataIndex
+	
 LOOP:
+	BSF		0x09, 0	    ; set control bits /WE, /CE, /OE
+	BSF		0x09, 1	    ; all high before shutting down 
+	BSF		0x09, 2
+	SLEEP
 	GOTO		LOOP
 
 Delay:	MOVLW		50		; delay routine
@@ -181,20 +226,20 @@ ChrPt2:	CALL		USART_SendByte	; print low character to serial port
 	RETURN
 		
 EEPROM_SetAddress:
-	BCF	0x03, 5			; select bank 0
-	BCF	0x03, 6
-	MOVF	AddressL, 0		; grab the low byte of address stored in memory
-	MOVWF	0x06			; store it in PORTB
-	MOVF	0x07, 0			; store PORTC in W
-	ANDLW	0xC0			; clear out all but the two high bits
-	MOVWF	Temp			; and store it in memory
-	MOVF	AddressH, 0		; grab the high byte of address stored in memory
-	ANDLW	0x3F			; mask out the two highest bits
-	IORWF	Temp, 0			; restore the two high bits originally in PORTC
-	MOVWF	0x07			; write the address to PORTC 0-5, preserving TX/RX bits
-	BSF	0x05, 0			; make RA0 = 1
-	BTFSS	AddressH, 6		; if bit is supposed to be 0
-	BCF	0x05, 0			; then make RA0 = 0
+	BCF		0x03, 5		; select bank 0
+	BCF		0x03, 6
+	MOVF		AddressL, 0	; grab the low byte of address stored in memory
+	MOVWF		0x06		; store it in PORTB
+	MOVF		0x07, 0		; store PORTC in W
+	ANDLW		0xC0		; clear out all but the two high bits
+	MOVWF		Temp		; and store it in memory
+	MOVF		AddressH, 0	; grab the high byte of address stored in memory
+	ANDLW		0x3F		; mask out the two highest bits
+	IORWF		Temp, 0		; restore the two high bits originally in PORTC
+	MOVWF		0x07		; write the address to PORTC 0-5, preserving TX/RX bits
+	BSF		0x05, 0		; make RA0 = 1
+	BTFSS		AddressH, 6	; if bit is supposed to be 0
+	BCF		0x05, 0		; then make RA0 = 0
 	RETURN
 
 EEPROM_IncrementAddress:
@@ -222,7 +267,20 @@ EEPROM_WriteByte:
 	BSF		0x09, 1		; /CE, /WE high
 	BSF		0x09, 0
 	CALL		Delay
-	RETURN	
+	RETURN
+	
+EEPROM_ReadByte:
+	BSF		0x09, 0		; ensure /WE, /CE are high
+	BSF		0x09, 1
+	BCF		0x09, 2		; make /OE low (enable read)
+	NOP
+	NOP
+	MOVF		0x08, W		; get the byte read at PORTD into W
+	NOP
+	NOP
+	BSF		0x09, 2		; make /OE high again
+	CALL Delay
+	RETURN
 	
 EEPROM_StartMessage:
         CLRF		MsgIndex
@@ -235,37 +293,6 @@ EEPROM_StartMsgLoop:
 	CALL		USART_SendByte
 	INCF		MsgIndex, F
 	GOTO		EEPROM_StartMsgLoop
-EEPROM_StartMsgStrt:
-	ADDWF		PCL, F
-        RETLW           'P'
-        RETLW           'r'
-        RETLW           'e'
-        RETLW           's'
-        RETLW           's'
-        RETLW           ' '
-        RETLW           'a'
-        RETLW           ' '
-        RETLW           'k'
-        RETLW           'e'
-        RETLW		'y'
-        RETLW           ' '
-        RETLW           't'
-        RETLW           'o'
-        RETLW           ' '
-        RETLW           'l'
-        RETLW           'o'
-        RETLW           'a'
-        RETLW           'd'
-        RETLW           ' '
-        RETLW           'E'
-        RETLW           'E'
-        RETLW           'P'
-        RETLW           'R'
-        RETLW           'O'
-        RETLW           'M'
-        RETLW           '.'
-	RETLW		0x0D
-	RETLW		0x0A
 	RETLW		0x00
 
 EEPROM_WriteMessage:
@@ -279,19 +306,6 @@ EEPROM_WriteMsgLoop:
 	CALL		USART_SendByte
 	INCF		MsgIndex, F
 	GOTO		EEPROM_WriteMsgLoop	
-EEPROM_WriteMsgStrt:
-	ADDWF		PCL, F
-        RETLW           'W'
-        RETLW           'r'
-        RETLW           'o'
-        RETLW           't'
-        RETLW           'e'
-        RETLW           ' '
-        RETLW           'b'
-        RETLW           'y'
-        RETLW           't'
-        RETLW           'e'
-        RETLW           ' '
 	RETLW		0x00
 
 EEPROM_WriteMsg2:
@@ -305,50 +319,104 @@ EEPROM_WriteMsg2Loop:
 	CALL		USART_SendByte		; otherwise, send byte
 	INCF		MsgIndex, F		; message index += 1
 	GOTO		EEPROM_WriteMsg2Loop	; repeat routine
+
+; All messages and code are stored at the beginning of a new page in program
+; memory. That way, the code to add to the PCL avoids and overflow that 
+	
+ORG	0x0300					; used to prevent page overflow
+
+EEPROM_StartMsgStrt:
+	ADDWF		PCL, F			; 0x0300
+        RETLW           'P'			; 0x0301
+        RETLW           'r'			; 0x0302
+        RETLW           'e'			; 0x0303
+        RETLW           's'			; 0x0304
+        RETLW           's'			; 0x0305    
+        RETLW           ' '			; 0x0306
+        RETLW           'a'			; 0x0307
+        RETLW           ' '			; 0x0308
+        RETLW           'k'			; 0x0309
+        RETLW           'e'			; 0x030A
+        RETLW		'y'			; 0x030B
+        RETLW           ' '			; 0x030C
+        RETLW           't'			; 0x030D
+        RETLW           'o'			; 0x030E
+        RETLW           ' '			; 0x030F
+        RETLW           'l'			; 0x0310
+        RETLW           'o'			; 0x0311
+        RETLW           'a'			; 0x0312
+        RETLW           'd'			; 0x0313
+        RETLW           ' '			; 0x0314
+        RETLW           'E'			; 0x0315
+        RETLW           'E'			; 0x0316
+        RETLW           'P'			; 0x0317
+        RETLW           'R'			; 0x0318
+        RETLW           'O'			; 0x0319
+        RETLW           'M'			; 0x031A
+        RETLW           '.'			; 0x031B
+	RETLW		0x0D			; 0x031C
+	RETLW		0x0A			; 0x031D
+	RETLW		0x00			; 0x031E
+	
+EEPROM_WriteMsgStrt:
+	ADDWF		PCL, F			; 0x031F
+        RETLW           'W'			; 0x0320
+	RETLW           'r'			; 0x0321
+        RETLW           'o'			; 0x0322
+        RETLW           't'			; 0x0323
+        RETLW           'e'			; 0x0324
+        RETLW           ' '			; 0x0325
+        RETLW           'b'			; 0x0326
+        RETLW           'y'			; 0x0327
+        RETLW           't'			; 0x0328
+        RETLW           'e'			; 0x0329
+        RETLW           ' '			; 0x032A
+	RETLW		0x00			; 0x032B
+	
 EEPROM_WriteMsg2Strt:
-	ADDWF		PCL, F
-        RETLW           ' '
-        RETLW           't'
-        RETLW           'o'
-        RETLW           ' '
-        RETLW           'a'
-        RETLW           'd'
-        RETLW           'd'
-        RETLW           'r'
-        RETLW           'e'
-        RETLW           's'
-        RETLW           's'
-	RETLW		' '
-	RETLW		0x00	
+	ADDWF		PCL, F			; 0x032C
+        RETLW           ' '			; 0x032D
+        RETLW           't'			; 0x032E
+        RETLW           'o'			; 0x032F
+        RETLW           ' '			; 0x0330
+        RETLW           'a'			; 0x0331
+        RETLW           'd'			; 0x0332
+        RETLW           'd'			; 0x0333
+        RETLW           'r'			; 0x0334
+        RETLW           'e'			; 0x0335
+        RETLW           's'			; 0x0336
+        RETLW           's'			; 0x0337
+	RETLW		' '			; 0x0338
+	RETLW		0x00			; 0x0339
 	
 EEPROM_LoadData:
-	ADDWF		PCL, F		; add W to the program counter
-	RETLW		0xA9		; 0xFE00    LDA
-	RETLW		0x01		; 0xFE01    #$01
-	RETLW		0x8D		; 0xFE02    STA
-	RETLW		0x00		; 0xFE03    $00
-	RETLW		0x02		; 0xFE04    $02
-	RETLW		0xA9		; 0xFE05    LDA
-	RETLW		0x05		; 0xFE06    #$05
-	RETLW		0x8D		; 0xFE07    STA
-	RETLW		0x01		; 0xFE08    $01
-	RETLW		0x02		; 0xFE09    $02
-	RETLW		0xA9		; 0xFE0A    LDA
-	RETLW		0x08		; 0xFE0B    #$08
-	RETLW		0x8D		; 0xFE0C    STA
-	RETLW		0x02		; 0xFE0D    $02
-	RETLW		0x02		; 0xFE0E    $02
-	RETLW		0x4C		; 0xFE0F    JMP
-	RETLW		0x00		; 0xFE10    $00
-	RETLW		0xFE		; 0xFE11    $FE
+	ADDWF		PCL, F		; add W to the program counter	0x033A
+	RETLW		0xA9		; 0xFE00    LDA			0x033B
+	RETLW		0x01		; 0xFE01    #$01		0x033C
+	RETLW		0x8D		; 0xFE02    STA			0x033D
+	RETLW		0x00		; 0xFE03    $00			0x033E
+	RETLW		0x02		; 0xFE04    $02			0x033F
+	RETLW		0xA9		; 0xFE05    LDA			0x0340
+	RETLW		0x05		; 0xFE06    #$05		0x0341
+	RETLW		0x8D		; 0xFE07    STA			0x0342
+	RETLW		0x01		; 0xFE08    $01			0x0343
+	RETLW		0x02		; 0xFE09    $02			0x0344
+	RETLW		0xA9		; 0xFE0A    LDA			0x0345
+	RETLW		0x08		; 0xFE0B    #$08		0x0346
+	RETLW		0x8D		; 0xFE0C    STA			0x0347
+	RETLW		0x02		; 0xFE0D    $02			0x0348	
+	RETLW		0x02		; 0xFE0E    $02			0x0349
+	RETLW		0x4C		; 0xFE0F    JMP			0x034A
+	RETLW		0x00		; 0xFE10    $00			0x034B
+	RETLW		0xFE		; 0xFE11    $FE			0x034C
 	
 EEPROM_Vectors:
-	ADDWF		PCL, F
-	RETLW		0x00		; 0xFFFA
-	RETLW		0xFE		; 0xFFFB
-	RETLW		0x00		; 0xFFFC
-	RETLW		0xFE		; 0xFFFD
-	RETLW		0x00		; 0xFFFE
-	RETLW		0xFE		; 0xFFFF
-
+	ADDWF		PCL, F		;				0x034D
+	RETLW		0x00		; 0xFFFA			0x034E
+	RETLW		0xFE		; 0xFFFB			0x034F
+	RETLW		0x00		; 0xFFFC			0x0350
+	RETLW		0xFE		; 0xFFFD			0x0351
+	RETLW		0x00		; 0xFFFE			0x0352
+	RETLW		0xFE		; 0xFFFF			0x0353
+	
 	END
