@@ -10,3 +10,5 @@ Serial02.asm - an echo program that repeats all characters typed into the termin
 Serial03.asm - the same function as Serial02 but with a startup message and use of an external library for USART functions.
 
 USART.asm - the basic functions for PIC16F877A serial protocol brought out to a library.
+
+EEPROM01.asm - the beginnings of an EEPROM programmer library to include a small 6502 program to be written into an AT28C256 EEPROM.
