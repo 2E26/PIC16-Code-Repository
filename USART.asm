@@ -3,11 +3,6 @@
 ; A library file of serial functions for the PIC16F877A
 ; Useful for communicating with a PC by way of the serial port
 
-	LIST	   P=16F877A
-	#include   <P16F877A.inc>
-	
-	CODE
-
 USART_Init:
 ;-------------------------------------------------------------------------------
 ; Init: - initializes serial communications with the hardware USART. Assumes
@@ -121,4 +116,39 @@ USART_SendCRLF:
 	CALL	   USART_SendByte
 	MOVLW	   0x0A
 	CALL	   USART_SendByte
+	RETURN
+	
+USART_PrintBytetoChar:
+;-------------------------------------------------------------------------------
+; PrintBytetoChar: - prints W to the serial terminal as a hex value (00-FF)
+; Memory: Temp, Temp2
+; Inputs: W holds numerical value to be printed 
+; Destroys: W
+; Outputs: none
+;-------------------------------------------------------------------------------    
+	MOVWF		Temp		; save W in a temporary byte
+	SWAPF		Temp, W		; write the same byte back to W with nibbles reversed
+	ANDLW		0x0F		; strike off top four bits
+	MOVWF		Temp2
+	SUBLW		0x09		; subtract W from 9
+	BTFSS		STATUS, 0	; check if carry flag is set. If so, W <= 9
+	GOTO		Letter		; 
+Number:	MOVF		Temp2, 0	; restore original nibble
+	ADDLW		0x30		; add 30h to convert numerical digit to ASCII character (0-9)
+	GOTO		CharPt		;
+Letter: MOVF		Temp2, 0	; restore original nibble
+	ADDLW		0x37		; add 37h to convert numerical digit to ASCII character (A-F)
+CharPt: CALL		USART_SendByte	; send the high character to the serial port
+	MOVF		Temp, 0		; get the original value of W back in original order
+	ANDLW		0x0F		; strip off four bits
+	MOVWF		Temp2		; save nibble
+	SUBLW		0x09		; W = 9 - W
+	BTFSS		STATUS, 0	; if result <= 0 then handle numerical digit
+	GOTO		Ltr2		; 
+Num2:	MOVF		Temp2, 0	; restore original nibble
+	ADDLW		0x30		; add 30h to convert to ASCII
+	GOTO		ChrPt2		;
+Ltr2:	MOVF		Temp2, 0	; restore original nibble
+	ADDLW		0x37		; add 37h to convert to ASCII
+ChrPt2:	CALL		USART_SendByte	; print low character to serial port
 	RETURN
