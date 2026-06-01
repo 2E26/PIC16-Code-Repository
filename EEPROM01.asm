@@ -58,9 +58,8 @@
 START:
         BCF		STATUS, RP1 ; set memory bank 1
         BSF		STATUS, RP0
-	MOVLW		0x00
-	MOVWF		TRISB	    ; set PortB to output
-	MOVWF		TRISD	    ; set PortD to output
+	CLRF		TRISB	    ; set PortB to output
+	CLRF		TRISD	    ; set PortD to output
 	MOVLW		0x80	    ; set PortC to output except RC7
 	MOVWF		TRISC	    ; configure PORTC
 	MOVLW		0x00	    ; set PortA to output
@@ -70,8 +69,8 @@ START:
 	BCF		STATUS, 6   ; set memory bank 0
 	BCF		STATUS, 5
 	BSF		PORTA, 1    ; set control bits /WE, /CE, /OE
-	BSF		PORTA, 2    ; to initial states
-	BCF		PORTA, 3
+	BSF		PORTA, 2    ; to initial states of high
+	BSF		PORTA, 3
 	
 	; now, write the following program to EEPROM starting at 0x7E00
 	; which will show up in computer memory 0xFE00
@@ -117,6 +116,14 @@ LoadLoop:
 	MOVF		AddressL, W	    ; W = low address byte
 	CALL		PrintBytetoChar	    ; print ASCII address low
 	CALL		USART_SendCRLF	    ; send 0x0D0A to serial port
+	;
+	;
+	CALL		Delay
+	CALL		Delay
+	CALL		Delay
+	CALL		Delay
+	;
+	;	
 	CALL		EEPROM_IncrementAddress
 	INCF		DataIndex, F	    ; Data Index ++
 	MOVF		DataIndex, W
@@ -147,6 +154,14 @@ VectorLoop:
 	MOVF		AddressL, 0	    ; W = low address byte
 	CALL		PrintBytetoChar	    ; print ASCII address low
 	CALL		USART_SendCRLF	    ; send 0x0D0A to serial port
+	;
+	;
+	CALL		Delay
+	CALL		Delay
+	CALL		Delay
+	CALL		Delay
+	;
+	;	
 	CALL		EEPROM_IncrementAddress
 	INCF		DataIndex, F	    ; Data Index ++
 	MOVF		DataIndex, 0
@@ -327,32 +342,24 @@ OverflowH:
 	GOTO		OverflowH	; for now, just loop forever if broken
 
 EEPROM_WriteByte:
-	CALL		Delay
 	MOVF		Databyte, W	; take the data to be written
 	MOVWF		PORTD		; write it to port D
 	BCF		PORTA, 2	; /CE low
-	BSF		PORTA, 3	; /OE high
 	NOP
 	NOP
 	BCF		PORTA, 1	; /WE low
-	NOP
-	NOP
 	BSF		PORTA, 1	; /WE high
 	NOP
 	NOP
 	BSF		PORTA, 2	; /CE high
-	BCF		PORTA, 3	; /OE low
 	RETURN
 	
 EEPROM_ReadByte:
-	CALL		Delay
 	BSF		PORTA, 1	; ensure /WE is high
 	BCF		PORTA, 2	; make /CE low (chip enable)
 	BCF		PORTA, 3	; make /OE low (enable read)
 	NOP
-	NOP
 	MOVF		PORTD, W	; get the byte read at PORTD into W
-	NOP
 	NOP
 	BSF		PORTA, 3	; make /OE high again
 	NOP
