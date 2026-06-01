@@ -11,4 +11,10 @@ Serial03.asm - the same function as Serial02 but with a startup message and use 
 
 USART.asm - the basic functions for PIC16F877A serial protocol brought out to a library.
 
+EEPROM.asm - a library with EEPROM functions for handling ROM chips in the AT28C256 family.
+
 EEPROM01.asm - the beginnings of an EEPROM programmer library to include a small 6502 program to be written into an AT28C256 EEPROM. Also, added character tables to enable display of text over the serial port with the PIC16.
+
+EEPROM0A.asm - a sample program to read all memory from an AT28C256. A troubleshooting tool more than anything else.
+
+EEPROM02.asm - a complete EEPROM programming application for EEPROM in the AT28C family. Maybe adaptable for EPROM and other ROM types as I become familiar with them.
