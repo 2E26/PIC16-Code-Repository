@@ -64,6 +64,41 @@ Overflow:
 	BSF		STATUS, 0
 	RETURN
 
+EEPROM_DecrementAddress:
+;-------------------------------------------------------------------------------
+; DecrementAddress: - decrements address stored in memory by 1, then sets the
+;		      new address. Underflow (0000-FFFF) returns with carry
+;		      flag set instead.
+; Memory: AddressL, AddressH
+; Inputs: none
+; Destroys: W register
+; Outputs: decreases address by 1, new address on PORTA, PORTB, PORTC, or carry
+;	   flag set in case of overflow
+;-------------------------------------------------------------------------------
+	MOVF		AddressL, W	    ; check if low byte is 0
+	XORLW		0x00		    ; 
+	BTFSC		STATUS, 2	    ; if zero flag is set
+	GOTO		Underflow_L	    ; handle low byte 0
+	DECF		AddressL, F	    ; otherwise, AddressL -= 1
+	BCF		STATUS, 0
+	RETURN
+Underflow_L:
+	MOVF		AddressH, W	    ; check if high byte is also 0
+	XORLW		0x00		    ;
+	BTFSC		STATUS, 2	    ; if zero flag is set
+	GOTO		Underflow_H	    ; handle address = 0x0000
+	DECF		AddressH	    ; otherwise, AddressH -= 1
+	MOVLW		0xFF		    ; roll over low byte
+	MOVWF		AddressL
+	BCF		STATUS, 0
+	RETURN
+Underflow_H:
+	BSF		STATUS, 0	    ; set carry flag
+	RETURN
+	
+    
+    RETURN	
+	
 EEPROM_WriteByte:
 ;-------------------------------------------------------------------------------
 ; WriteByte: - writes the byte stored in W into EEPROM. This assumes TRISD is
@@ -245,3 +280,46 @@ EEPROM_SDP_On:
 	MOVWF		D1
 	CALL		EEPROM_msDelay
 	RETURN
+
+EEPROM_BoundCheck
+;-------------------------------------------------------------------------------
+; BoundCheck: - checks whether the prospective address is within user-defined
+;               limits. Size is in number of kilobytes
+; Memory: DeviceSize, Temp, InByteH
+; Inputs: high byte of new address stored in InByteH
+; Destroys: Temp, W
+; Outputs: carry = 1 if current address is higher than maximum ROM size
+;
+; This routine checks the boundary by multiplying device size (in kB) by four
+; and checking it against the high byte of the address the program is trying to
+; change to. If it is greater than or equal to this number, return a carry
+; flag set indicating that is not a valid address. It also allows any address
+; if DeviceSize is 64, as any 16-bit address would be valid on a 64 kB ROM.
+;
+; Example - address is commanded to become 0x1001. Size of ROM has been stated
+;           to be 4 kB (0b00000100). Multiply size by four (0b00010000) and
+;           compare to the commanded address (0b0001000000000001). Since the
+;           high byte of the address is equal to four times the size, this is
+;           not a valid address (for a 4 kB ROM, the address span would
+;           be limited to 0x0000 - 0x0FFF.
+; 
+;-------------------------------------------------------------------------------
+    MOVF	DeviceSize, W			    ; get device size
+    XORLW	0x40				    ; compare it to 64
+    BTFSC	STATUS, 2			    ; was it equal?
+    GOTO	EEPROM_BoundCheck_Good		    ; any address is valid
+    MOVF	DeviceSize, W			    ; get size back
+    MOVWF	Temp				    ; save it to memory
+    BCF		STATUS, 0
+    RLF		Temp, F				    ; rotate it left twice
+    BCF		STATUS, 0
+    RLF		Temp, W				    ; multiply by four
+    SUBWF	InByteH, W			    ; W = InByteH - W
+    BTFSC	STATUS, 0
+    GOTO	EEPROM_BoundCheck_Bad
+EEPROM_BoundCheck_Good:
+    BCF		STATUS, 0
+    RETURN
+EEPROM_BoundCheck_Bad:
+    BSF		STATUS, 0
+    RETURN
