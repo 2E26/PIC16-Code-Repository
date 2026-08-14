@@ -87,7 +87,7 @@ Underflow_L:
 	XORLW		0x00		    ;
 	BTFSC		STATUS, 2	    ; if zero flag is set
 	GOTO		Underflow_H	    ; handle address = 0x0000
-	DECF		AddressH	    ; otherwise, AddressH -= 1
+	DECF		AddressH, F	    ; otherwise, AddressH -= 1
 	MOVLW		0xFF		    ; roll over low byte
 	MOVWF		AddressL
 	BCF		STATUS, 0
@@ -96,7 +96,6 @@ Underflow_H:
 	BSF		STATUS, 0	    ; set carry flag
 	RETURN
 	
-    
     RETURN	
 	
 EEPROM_WriteByte:
@@ -147,13 +146,15 @@ EEPROM_msDelay:
 ;	     D1 with a number of repetitions
 ; Memory: D1, D2, D3
 ; Inputs: D1 - number of milliseconds to delay
-; Destroys: W
+; Destroys: W (if D1 is zero at time of calling)
 ; Outputs: none
 ; 
 ; The delay can be calculated by the following formula:
 ; ((((D3-1) * 3 µS) + 5µS) * (D2-1) + 7µS) + (6µS) + (7µS * (D1 - 1))
+;
+; NOTE: this is accurate only for an oscillator frequency of 4.000 MHz
 ;-------------------------------------------------------------------------------
-	MOVF		D1, W	    ; check if D1 is zero by moving it to W
+	MOVF		D1, F	    ; check if D1 is zero by writing to itself
 	BTFSS		STATUS, 2   ; and checking the zero flag
 	GOTO		Del1	    ; if not, move along
 	MOVLW		0x01	    ; if so, make D1 = 1 to run loop
@@ -281,7 +282,7 @@ EEPROM_SDP_On:
 	CALL		EEPROM_msDelay
 	RETURN
 
-EEPROM_BoundCheck
+EEPROM_BoundCheck:
 ;-------------------------------------------------------------------------------
 ; BoundCheck: - checks whether the prospective address is within user-defined
 ;               limits. Size is in number of kilobytes
