@@ -257,6 +257,7 @@ Input_Enter:
     MOVWF	FSR			; transfer contents to indirect pointer
     MOVLW	0x00			; load a null character
     MOVWF	INDF			; into the last spot in the input buffer
+    CALL	USART_SendCRLF
     GOTO	Command_Handler
     
 Input_Backspace:
@@ -531,9 +532,9 @@ Command_Handler_Address_Write:
     MOVLW	0x11
     CALL	TextMessage
     MOVF	AddressH, W
-    CALL	USART_SendByte
+    CALL	USART_PrintBytetoChar
     MOVF	AddressL, W
-    CALL	USART_SendByte
+    CALL	USART_PrintBytetoChar
     CALL	USART_SendCRLF
     GOTO	Command_Handler_End
 Command_Handler_Address_Invalid:
@@ -762,6 +763,7 @@ Command_Handler_Dump_Loop03:
     ANDLW	0x1F
     BTFSS	STATUS, 2
     GOTO	Command_Handler_Dump_Loop02
+    CALL	USART_SendCRLF
     GOTO	Command_Handler_Dump_Loop01
 Command_Handler_Dump_Loop_End:
     CALL	USART_SendCRLF
@@ -992,7 +994,7 @@ Command_Handler_Lock:
     GOTO	Command_Handler_End		; error out if not
     MOVF	DeviceSize, W			; SDP on routine is only
     XORLW	0x20				; compatible with AT28C256
-    BTFSC	STATUS, 2			; exit if size != 32
+    BTFSS	STATUS, 2			; exit if size != 32
     GOTO	Command_Handler_End
     ; later, should print a message to notify 
     CALL	EEPROM_SDP_On
@@ -1392,6 +1394,7 @@ Command_Handler_Size_PrintValue:
     CALL	TextMessage		; print to serial monitor
     MOVF	DeviceSize, W		; retrieve the device size value
     CALL	Decimal_Text		; convert it to ASCII and print it
+    CALL	USART_SendCRLF
     GOTO	Command_Handler_End	; return to main loop    
     
 Command_Handler_Unlock:
@@ -1400,7 +1403,7 @@ Command_Handler_Unlock:
     GOTO	Command_Handler_End		; error out if not
     MOVF	DeviceSize, W			; check if size = 32
     XORLW	0x20				; this only works for AT28C256
-    BTFSC	STATUS, 2			; type ROM
+    BTFSS	STATUS, 2			; type ROM
     GOTO	Command_Handler_Unlock_Fail
     CALL	EEPROM_SDP_Off
     MOVLW	0x10
@@ -2051,6 +2054,7 @@ TextMessageLoop:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	StartMsgText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it
 TextMessageLoop01:
     ; displays when 'H' is entered without argument - displays list of commands
@@ -2062,6 +2066,7 @@ TextMessageLoop01:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgHText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it
 TextMessageLoop02:
     ; Error prefix - starts with "ERROR - " when an error is encountered
@@ -2073,6 +2078,7 @@ TextMessageLoop02:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	ErrorMsgText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it
 TextMessageLoop03:
     ; Error message that displays when an invalid input happens
@@ -2084,6 +2090,7 @@ TextMessageLoop03:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	InputErrorMsgText   ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it
 TextMessageLoop04:
     ; Error message that displays when too many characters are input
@@ -2095,6 +2102,7 @@ TextMessageLoop04:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	InputError2MsgText  ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it
 TextMessageLoop05:
     ; displays help for 'A' command
@@ -2106,6 +2114,7 @@ TextMessageLoop05:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgAText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it
 TextMessageLoop06:
     ; displays help for 'B' command
@@ -2117,6 +2126,7 @@ TextMessageLoop06:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgBText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it    
 TextMessageLoop07:
     ; displays help for 'D' command
@@ -2128,6 +2138,7 @@ TextMessageLoop07:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgDText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it 
 TextMessageLoop08:
     ; displays help for 'F' command
@@ -2139,6 +2150,7 @@ TextMessageLoop08:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgFText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it 
 TextMessageLoop09:
     ; displays help for 'L' command
@@ -2150,6 +2162,7 @@ TextMessageLoop09:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgLText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it 
 TextMessageLoop0A:
     ; displays help for 'P' command
@@ -2161,6 +2174,7 @@ TextMessageLoop0A:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgPText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it 
 TextMessageLoop0B:
     ; displays help for 'R' command
@@ -2172,6 +2186,7 @@ TextMessageLoop0B:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgRText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it 
 TextMessageLoop0C:
     ; displays help for 'S' command
@@ -2183,6 +2198,7 @@ TextMessageLoop0C:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgSText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it 
 TextMessageLoop0D:
     ; displays help for 'U' command
@@ -2194,8 +2210,8 @@ TextMessageLoop0D:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgUText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it 
-
 TextMessageLoop0E:
     ; displays help for 'W' command
     MOVF	MsgNumber, W
@@ -2206,6 +2222,7 @@ TextMessageLoop0E:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgWText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it    
 TextMessageLoop0F:
     ; displays help for '+' command
@@ -2217,6 +2234,7 @@ TextMessageLoop0F:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgPLUSText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it      
 TextMessageLoop10:
     ; displays help for '-' command
@@ -2228,6 +2246,7 @@ TextMessageLoop10:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgMINUSText    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it      
 TextMessageLoop11:
     ; response message for enabling Software Data Protection
@@ -2239,6 +2258,7 @@ TextMessageLoop11:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	LockMsgText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it     
 TextMessageLoop12:
     ; response message for disabling Software Data Protection
@@ -2250,6 +2270,7 @@ TextMessageLoop12:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	UnlockMsgText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it       
 TextMessageLoop13:
     ; indicates new address. Literally "Address: " and then the address
@@ -2261,6 +2282,7 @@ TextMessageLoop13:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	AddressMsgText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it
 TextMessageLoop13a:
     ; declares ROM size set to a certain value.
@@ -2272,6 +2294,7 @@ TextMessageLoop13a:
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	DeviceSizeMsgText
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd
 TextMessageLoop14:
     ; Increment error. Displays the address right afterward
@@ -2283,6 +2306,7 @@ TextMessageLoop14:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	IncFailMsgText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it    
 TextMessageLoop15:
     ; Increment error. Displays the address right afterward
@@ -2294,6 +2318,7 @@ TextMessageLoop15:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	DecFailMsgText	    ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it    
 TextMessageLoop16:
     ; Increment error. Displays the address right afterward
@@ -2305,6 +2330,7 @@ TextMessageLoop16:
     MOVWF	PCLATH		    ; into PCLATH
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	InvalidSizeMsgText  ; get a string character into W
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd  ; proceed to printing it
 TextMessageLoop17:
     ; Invalid address error. User tried to specify an address outside of
@@ -2317,6 +2343,7 @@ TextMessageLoop17:
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	InvalidAddrMsgText
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd
 TextMessageLoop18:
     ; Write message. Shows the user we are trying to write a byte
@@ -2328,6 +2355,7 @@ TextMessageLoop18:
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	WriteByteMsg1Text
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd    
 TextMessageLoop19:
     ; Write message part two. Shows the user the address we are writing to.
@@ -2339,6 +2367,7 @@ TextMessageLoop19:
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	WriteByteMsg2Text
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd
 TextMessageLoop20:
     ; Write message part three. Displays the written byte read back and address.
@@ -2350,6 +2379,7 @@ TextMessageLoop20:
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	WriteByteMsg3Text
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd
 TextMessageLoop21:
     ; Fill message prompt. Displays byte entered and ROM size
@@ -2361,6 +2391,7 @@ TextMessageLoop21:
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	FillMsg1Text
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd
 TextMessageLoop22:
     ; Fill message prompt. Displays " kilobytes." after the ROM size.
@@ -2372,6 +2403,7 @@ TextMessageLoop22:
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	FillMsg2Text
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd
 TextMessageLoop23:
     ; Fill message prompt. Tells user to hit Y or any other key
@@ -2383,6 +2415,7 @@ TextMessageLoop23:
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	FillMsg3Text
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd
 TextMessageLoop24:
     ; Fill cancel message. Displayed before going back to main loop.
@@ -2394,6 +2427,7 @@ TextMessageLoop24:
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	FillMsg4Text
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd
 TextMessageLoop25:
     ; Fill complete message. Displays the written byte.
@@ -2405,6 +2439,7 @@ TextMessageLoop25:
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	FillMsg5Text
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd
 TextMessageLoop26:
     ; Page display prompt - indicates what the printed bytes on screen are.
@@ -2416,6 +2451,7 @@ TextMessageLoop26:
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	PageMsg1Text
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd
 TextMessageLoop27:
     ; Page display prompt - indicates what the printed bytes on screen are.
@@ -2427,6 +2463,7 @@ TextMessageLoop27:
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	PageMsg2Text
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd
 TextMessageLoop28:
     ; Page buffer write success - indicates write to page buffer.
@@ -2438,6 +2475,7 @@ TextMessageLoop28:
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	PageMsg3Text
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd
 TextMessageLoop29:
     ; Block write success - indicates completion of block write to ROM.
@@ -2449,33 +2487,37 @@ TextMessageLoop29:
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	BlockMsg1Text
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd
 TextMessageLoop2A:
     ; Block write error - bytes specified exceeds page capacity.
     MOVF	MsgNumber, W
-    XORLW	0x86
+    XORLW	0x87
     BTFSS	STATUS, 2
     GOTO	TextMessageLoop2B
     MOVLW	0x0E
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	BlockMsg2Text
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd
 TextMessageLoop2B:
     ; Block write error - invalid address for block write.
     MOVF	MsgNumber, W
-    XORLW	0x87
+    XORLW	0x88
     BTFSS	STATUS, 2
     GOTO	TextMessageNotFound
     MOVLW	0x0E
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	BlockMsg3Text
+    CLRF	PCLATH
     GOTO	TextMessageLoopEnd
     
 TextMessageNotFound:    
     RETURN				; in case we don't find a match
 TextMessageLoopEnd:
+    CLRF	PCLATH
     XORLW	0x00			; check for null character
     BTFSC	STATUS, 2		; exit routine if we find one
     RETURN
@@ -3650,8 +3692,6 @@ DeviceSizeMsgText:				; 20 data words, message 12
     RETLW   't'
     RETLW   'o'
     RETLW   ' '
-    RETLW   0x0D
-    RETLW   0x0A
     RETLW   0x00
 
 InvalidAddrMsgText:				; 26 data words, message 86
@@ -4090,7 +4130,7 @@ BlockMsg1Text:					; 42 data words, message 1E
     RETLW   ' '
     RETLW   0x00
     
-BlockMsg2Text:			    ; 37 data words, message 86
+BlockMsg2Text:			    ; 37 data words, message 87
     ; " not enough bytes in page buffer."
     ADDWF   PCL, F
     RETLW   ' '
@@ -4130,7 +4170,7 @@ BlockMsg2Text:			    ; 37 data words, message 86
     RETLW   0x0A
     RETLW   0x00
 
-BlockMsg3Text:			    ; 44 data words, message 87
+BlockMsg3Text:			    ; 44 data words, message 88
     ; " block write must start at 64-byte page."
     ADDWF   PCL, F
     RETLW   ' '
