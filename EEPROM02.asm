@@ -26,9 +26,9 @@
 	    DataIndex
 	    WriteSuccess
 	    DeviceSize
-	    BlockSize
+	    PageSize
 	    InputPtr
-	    PlaceHolder
+	    PagePtr
 	    InputBuffer0	    ; buffer starting at 0x30
 	    InputBuffer1
 	    InputBuffer2
@@ -43,7 +43,7 @@
 	ENDC
 	
 	CBLOCK 0x40		    ; 64 bytes for page write
-	    BlockBuffer0
+	    PageBuffer0
 	ENDC
 	
 	ORG 0x0000
@@ -73,10 +73,10 @@
 ; A - "Address" enters the address in ROM to perform functions*
 ; B - "Block Write ROM" writes a block of up to 64 bytes into ROM
 ; D - "Dump" displays entire ROM contents on the serial monitor*
-; F - "Fill" writes a specified byte to all ROM locations
+; F - "Fill" writes a specified byte to all ROM locations*
 ; H - "Help" displays a help menu with commands, syntax, and function*
 ; L - "Lock" enables software data protection*
-; P - "Page" loads data into memory to be written by Block Write
+; P - "Page" loads data into memory to be written by Block Write*
 ; R - "Read ROM" reads ROM and displays it on the serial monitor*
 ; S - "Size" sets the size of the ROM in kB. Must be done first*
 ; U - "Unlock" disables software data protection*
@@ -113,7 +113,7 @@ START:
     CLRF	MsgNumber
     CLRF	DataIndex
     CLRF	WriteSuccess
-    CLRF	BlockSize
+    CLRF	PageSize
     MOVLW	0x30		    ; establish pointer to input buffer
     MOVWF	FSR
     CALL	USART_Init	    ; initiate serial port functions
@@ -505,7 +505,7 @@ Command_Handler_Address:
     CALL	Text_Hexadecimal
     XORLW	0x00			; check if W is 0 (success!)
     BTFSC	STATUS, 2		; proceed to print character if so
-    GOTO	Command_Handler_Address_BoundCheck
+    GOTO	Command_Handler_Address_BoundChk
     MOVWF	DataByte		; save W
     XORLW	0xFD			; check for buffer overrun
     BTFSS	STATUS, 2		; is W = 0xFD?
@@ -516,7 +516,7 @@ Command_Handler_Address:
     CALL	TextMessage
     CALL	USART_SendCRLF
     GOTO	Command_Handler_End
-Command_Handler_Address_BoundCheck:
+Command_Handler_Address_BoundChk:
     CALL	EEPROM_BoundCheck
     BTFSC	STATUS, 0
     GOTO	Command_Handler_Address_Invalid	
@@ -530,9 +530,9 @@ Command_Handler_Address_Write:
     CALL	USART_SendCRLF
     MOVLW	0x11
     CALL	TextMessage
-    MOVF	AddressH
+    MOVF	AddressH, W
     CALL	USART_SendByte
-    MOVF	AddressL
+    MOVF	AddressL, W
     CALL	USART_SendByte
     CALL	USART_SendCRLF
     GOTO	Command_Handler_End
@@ -541,6 +541,153 @@ Command_Handler_Address_Invalid:
     MOVLW	0x80
     CALL	TextMessage
     MOVLW	0x86
+    CALL	TextMessage
+    GOTO	Command_Handler_End
+    
+Command_Handler_Block:
+    ; writes NN bytes from the page into ROM at the current address. Maximum
+    ; block write is 64 bytes. Can only start on an address where bits 0-5
+    ; are cleared (EG - address low byte is 0b**00 0000)
+    CALL	Command_Handler_Size_Check	; check if ROM size is set
+    BTFSC	STATUS, 0			; carry flag will tell us
+    GOTO	Command_Handler_End		; error out if not
+    ; Flow of routine:
+    ;
+    ; 1) normal checks - ensure ROM size exists, ensure input is valid.
+    ; 2) valid input check - is the number entered larger than 255? Is it more
+    ;    than 64? Is it larger than PageSize? Is it zero? All of these 
+    ;    conditions will result in a specific error which tells the user 
+    ;    that data demand exceeds the supply
+    ; 3) address check - does the address start at a value divisible by 64?
+    ; 4) clear the page pointer
+    ; 5) use the current page pointer to point to a byte in the page buffer,
+    ;    grab a byte from the page buffer, and write it to EEPROM
+    ; 6) increment address, increment the page buffer. See if the page buffer
+    ;    equals the page size. If it doesn't, repeat from step 5
+    ; 7) if the pointer equals the page size, we are done writing. Delay by
+    ;    10 milliseconds to allow the ROM to write to its internal memory.
+    ; 8) display a message stating the number of bytes written and where to
+    ; 9) if step 2 found that the input byte demand exceeds the amount of bytes
+    ;    written in the page buffer, display an error message to indicate that
+    ; A) if step 3 found that the address could not support a page write,
+    ;    display an error message stating that
+    ;
+    INCF	InputPtr, F		; bump the input pointer up by one
+    MOVLW	0x30			; offset the pointer by 30
+    ADDWF	InputPtr, W		; mix the two in W
+    MOVWF	FSR			; copy W to the indirect register
+    MOVF	INDF, W			; get the character into W
+    BTFSC	STATUS, 2		; zero flag set if it is null char
+    GOTO	Input_Invalid
+    XORLW	' '			; check if it is space
+    BTFSS	STATUS, 2		; if next character is not space or 0
+    GOTO	Input_Invalid		; input is invalid. Try again nerd
+    INCF	InputPtr, F		; check character after space to see if
+    MOVLW	0x30			; it is a null character. This is to
+    ADDWF	InputPtr, W		; reject commands like "R "
+    MOVWF	FSR
+    MOVF	INDF, W
+    BTFSC	STATUS, 2
+    GOTO	Input_Invalid
+    DECF	InputPtr, F
+    CALL	Text_Decimal
+    XORLW	0x00			; check if W is 0 (success!)
+    BTFSC	STATUS, 2		; proceed to print character if so
+    GOTO	Command_Handler_Block_1
+    MOVWF	DataByte		; save W
+    XORLW	0xFD			; check for buffer overrun
+    BTFSS	STATUS, 2		; is W = 0xFD?
+    GOTO	Input_Invalid		; if not, print invalid input message
+    MOVLW	0x80
+    CALL	TextMessage
+    MOVLW	0x82
+    CALL	TextMessage
+    CALL	USART_SendCRLF
+    GOTO	Command_Handler_End
+Command_Handler_Block_1:
+    ; the most basic input checks have passed. Now we make sure that the input
+    ; was a number between 1-64, and it does not exceed the PageSize variable.
+    ; if PageSize is at zero, this will also fail and display a distinct error
+    ; to remind the user we need to load data into memory before trying to
+    ; write it to ROM.
+    MOVF	InByteH, F		; did the decimal read result in a
+    BTFSS	STATUS, 2		; value in the high byte? Error out.
+    GOTO	Input_Invalid
+    MOVF	InByteL, W		; load low byte into W. Check if it is
+    BTFSC	STATUS, 2		; zero. Error out if zero.
+    GOTO	Input_Invalid
+    SUBLW	0x40			; check if input was larger than 64
+    BTFSS	STATUS, 0		; and error out if it was
+    GOTO	Input_Invalid
+    MOVF	InByteL, W
+    SUBWF	PageSize, W		; compare W and page size. If page
+    BTFSS	STATUS, 0		; size is less than W, specific error
+    GOTO	Command_Handler_Block_5
+Command_Handler_Block_1.5:
+    ; now we need to ensure that the current address is correct. To write to
+    ; a block, we need to start at an address that is divisible by 64. That is,
+    ; the low byte of the address must have bits 0-5 clear. There should be a
+    ; distinct error message if the address is not valid.
+    MOVF	AddressL, W
+    ANDLW	0x3F
+    BTFSS	STATUS, 2
+    GOTO	Command_Handler_Block_6
+Command_Handler_Block_2:
+    ; the input is valid. Initialize the variables we need to write our data to
+    ; ROM.
+    CLRF	PagePtr
+    BSF		STATUS, RP0			; set PORTD to output
+    BCF		STATUS, RP1
+    CLRF	TRISD
+    BCF		STATUS, RP0
+    BCF		STATUS, RP1
+Command_Handler_Block_3:
+    ; set up the indirect register to point to a certain variable in the page
+    ; buffer. Withdraw a byte from it and write it to ROM.
+    MOVLW	0x40			
+    ADDWF	PagePtr, W
+    MOVWF	FSR
+    MOVF	INDF, W
+    CALL	EEPROM_WriteByte
+    CALL	EEPROM_IncrementAddress
+    INCF	PagePtr, F
+    MOVF	PagePtr, W
+    XORWF	InByteL, W
+    BTFSS	STATUS, 2
+    GOTO	Command_Handler_Block_3
+Command_Handler_Block_4:
+    ; the code falls through to this part once all of the bytes have been
+    ; written to ROM
+    MOVLW	0x0A
+    MOVWF	D1
+    CALL	EEPROM_msDelay
+Command_Handler_Block_4.5:
+    ; after the delay to allow EEPROM to write data, we display a message
+    ; and return control to the user.
+    MOVF	InByteL, W		    ; print number of bytes
+    CALL	Decimal_Text
+    MOVLW	0x1E
+    CALL	TextMessage
+    MOVF	AddressH, W		    ; print current address
+    CALL	USART_PrintBytetoChar	    ; after block write
+    MOVF	AddressL, W
+    CALL	USART_PrintBytetoChar
+    CALL	USART_SendCRLF
+    GOTO	Command_Handler_End   
+Command_Handler_Block_5:
+    ; this code executes if the number of bytes to block-write entered is
+    ; greater than the number of bytes in the page.
+    MOVLW	0x80
+    CALL	TextMessage
+    MOVLW	0x86
+    CALL	TextMessage
+    GOTO	Command_Handler_End
+Command_Handler_Block_6:
+    ; this code executes if the address is not valid for a block write. It
+    ; can only start on the beginning of a 64-byte page in ROM.
+    MOVLW	0x80
+    CALL	TextMessage
+    MOVLW	0x87
     CALL	TextMessage
     GOTO	Command_Handler_End
     
@@ -607,7 +754,7 @@ Command_Handler_Dump_Loop02:
     ANDLW	0x03
     BTFSS	STATUS, 2
     GOTO	Command_Handler_Dump_Loop03	; skip to 32 check
-    DECFSZ	D1
+    DECFSZ	D1, F
     GOTO	Command_Handler_Dump_Loop01	; go to new line and go again
     GOTO	Command_Handler_Dump_Loop_End	; if D1 = 0, end function
 Command_Handler_Dump_Loop03:
@@ -633,7 +780,19 @@ Command_Handler_Fill:
     ;
     ; 1) perform usual checks for validating input. If the input is anything
     ;    other than "F xx", the check fails and we end up leaving the routine
-    ; 2) 
+    ; 2) display a message prompting the user to confirm they want to fill
+    ;    the entire EEPROM with the given byte. Wait for an input. If it is
+    ;    anything other than 'Y' or 'y', go back to the main loop
+    ; 3) set PORTD to output, clear current address, and copy DeviceSize to
+    ;    InByteH
+    ; 4) put the fill byte in W and write it to the ROM
+    ; 5) increment the address. If it overflowed, error out
+    ; 6) check if address is divisible by 64 (logical AND with 0x3F, check for
+    ;    zero result). If so, go to a delay routine so the EEPROM can write
+    ;    the page. If not, go back to #4
+    ; 7) after waiting the 10 mS, check if the address is divisible by 1024. If
+    ;    so, decrement D1 (we crossed into another kB of space). If D1 is zero,
+    ;    we have finished writing to ROM and can be finished.
     ;
     INCF	InputPtr, F		; bump the input pointer up by one
     MOVLW	0x30			; offset the pointer by 30
@@ -656,7 +815,7 @@ Command_Handler_Fill:
     CALL	Text_Hexadecimal
     XORLW	0x00			; check if W is 0 (success!)
     BTFSC	STATUS, 2		; proceed to print character if so
-    GOTO	Command_Handler_Fill_Prompt
+    GOTO	Command_Handler_Fill_Check
     MOVWF	DataByte		; save W
     XORLW	0xFD			; check for buffer overrun
     BTFSS	STATUS, 2		; is W = 0xFD?
@@ -667,9 +826,99 @@ Command_Handler_Fill:
     CALL	TextMessage
     CALL	USART_SendCRLF
     GOTO	Command_Handler_End
+Command_Handler_Fill_Check:
+    ; check to ensure the input was only a single byte
+    MOVF	InByteH, F
+    BTFSS	STATUS, 2
+    GOTO	Input_Invalid
 Command_Handler_Fill_Prompt:
     ; display a prompt to ensure the user really wants to fill the entire ROM
     ; with only one value. Essentially, "Are you sure? (Y/N)"
+    CALL	USART_SendCRLF
+    MOVF	InByteL, W		; print the address
+    CALL	USART_PrintBytetoChar
+    MOVLW	0x16
+    CALL	TextMessage
+    MOVF	DeviceSize, W
+    CALL	Decimal_Text
+    MOVLW	0x17
+    CALL	TextMessage
+    MOVLW	0x18
+    CALL	TextMessage
+    CALL	USART_GetByte		; get a character from the keyboard
+    ANDLW	0xDF			; convert to upper case
+    XORLW	0x59			; check if it is 'Y'
+    BTFSC	STATUS, 2		; if so, move on to the function
+    GOTO	Command_Handler_Fill_Go
+    MOVLW	0x19
+    CALL	TextMessage
+    GOTO	Command_Handler_End
+Command_Handler_Fill_Go:
+    ; at this point we have a valid byte in InByteL. We clear the address,
+    ; record the number of kilobytes in another byte, and count until we finish
+    ; covering all bytes in EEPROM. One difference from this and Dump is that
+    ; we don't have to display each byte. We just have to report at the end
+    ; when we have written all data into memory.
+    MOVLW	0x59
+    CALL	USART_SendByte
+    CALL	USART_SendCRLF
+    BSF		STATUS, RP0			; set PORTD to output
+    BCF		STATUS, RP1
+    CLRF	TRISD
+    BCF		STATUS, RP0
+    BCF		STATUS, RP1
+    CLRF	AddressL			; set address to 0x0000
+    CLRF	AddressH
+    CALL	EEPROM_SetAddress
+    MOVF	DeviceSize, W
+    MOVWF	InByteH				; copy kB number to InByteH
+Command_Handler_Fill_Go2:
+    ; write the byte, increment address. If the increment overflows, stop.
+    ; If we crossed a 64 threshold, pause for 10 mS so the EEPROM can enter
+    ; its write phase. While we're doing that, check if we crossed a 1024
+    ; boundary so we can decrement the kilobytes counter (if needed)
+    MOVF	InByteL, W			; get the fill byte
+    CALL	EEPROM_WriteByte		; pop it onto ROM
+    CALL	EEPROM_IncrementAddress		; address++
+    BTFSC	STATUS, 0
+    GOTO	Command_Handler_Fill_FinalDelay
+    MOVF	AddressL, W
+    ANDLW	0x3F				; check if address is divisible
+    BTFSC	STATUS, 2			; by 64. If so, go to 10 mS
+    GOTO	Command_Handler_Fill_Go3    
+    GOTO	Command_Handler_Fill_Go2
+Command_Handler_Fill_Go3:
+    ; delays 10 milliseconds to allow EEPROM write sequence to work. After
+    ; the delay, check if address is divisible by 1024 by ANDing AddressL
+    ; with 0xFF and ANDing AddressH by 
+    MOVLW	0x0A				; set W to 10
+    MOVWF	D1				; set to D1
+    CALL	EEPROM_msDelay			; wait 10 milliseconds
+    MOVF	AddressL, F			; bit test low Address byte
+    BTFSS	STATUS, 2
+    GOTO	Command_Handler_Fill_Go2	; if AddressL != 0 repeat write
+    MOVLW	0x03				; check if AddressH is divisible
+    ANDWF	AddressH, W			; by 4. If so, we count down
+    BTFSS	STATUS, 2			; one kB in InByteH
+    GOTO	Command_Handler_Fill_Go2
+    DECFSZ	InByteH, F
+    GOTO	Command_Handler_Fill_Go2
+    GOTO	Command_Handler_Fill_End
+Command_Handler_Fill_FinalDelay:		; this only executes if
+    MOVLW	0x0A				; ROM is 64 KB. Increment will
+    MOVWF	D1				; not raise it above 0xFFFF,
+    CALL	EEPROM_msDelay			; which will fail regular checks
+Command_Handler_Fill_End:
+    ; Sets address to 0x0000 after filling all memory
+    ; Display text messaging stating the successfull fill operation
+    CLRF	AddressL
+    CLRF	AddressH
+    CALL	EEPROM_SetAddress
+    MOVF	InByteL, W
+    CALL	USART_PrintBytetoChar
+    MOVLW	0x1A
+    CALL	TextMessage
+    GOTO	Command_Handler_End
     
 Command_Handler_Help_A:
     MOVLW	0x03
@@ -748,6 +997,216 @@ Command_Handler_Lock:
     ; later, should print a message to notify 
     CALL	EEPROM_SDP_On
     MOVLW	0x0F
+    CALL	TextMessage
+    GOTO	Command_Handler_End
+    
+Command_Handler_Page:
+    ; allows the user (or another digital controller) to load bytes for a
+    ; block write. Validates entries and places them into media.
+    CALL	Command_Handler_Size_Check	; check if ROM size is set
+    BTFSC	STATUS, 0			; carry flag will tell us
+    GOTO	Command_Handler_End		; error out if not
+    ; Flow:
+    ;
+    ; 1) normal size check - do not proceed until we know what size the ROM is
+    ; 2) check the command. If it is "P" with no arguments, display the current
+    ;    page if the size is not zero. Otherwise, error out (invalid input)
+    ; 3) if there is an argument, validate it is a decimal number between
+    ;    1-64. This is the valid page size.
+    ; 4) clear the page pointer and the entire page buffer to enter new data.
+    ; 5) accept bytes one at a time from input. Validate if byte is an ascii
+    ;    character '0'-'9' or 'A'-'F'. Echo a valid character. If character
+    ;    entered is ENTER (0x0A or 0x0D), stop entering characters and jump
+    ;    to step 9.
+    ; 6) on the second character, perform three operations: write the entered
+    ;    characters into the buffer page as a byte, increment the page
+    ;    buffer pointer, and echo a space.
+    ; 7) check if the buffer pointer is equal to the page size. If so, end
+    ;    a page write and display a success message.
+    ; 8) if buffer pointer is not equal to the page size, check if it is 32.
+    ;    if it is 32, print a CR/LF combo to move to a new line.
+    ; 9) display a message stating the number of bytes written to the page.
+    ;
+    INCF	InputPtr, F		; bump the input pointer up by one
+    MOVLW	0x30			; offset the pointer by 30
+    ADDWF	InputPtr, W		; mix the two in W
+    MOVWF	FSR			; copy W to the indirect register
+    MOVF	INDF, W			; get the character into W
+    BTFSC	STATUS, 2		; zero flag set if it is null char
+    GOTO	Command_Handler_Page_Display
+    XORLW	' '			; check if it is space
+    BTFSS	STATUS, 2		; if next character is not space or 0
+    GOTO	Input_Invalid		; input is invalid. Try again nerd
+    INCF	InputPtr, F		; check character after space to see if
+    MOVLW	0x30			; it is a null character. This is to
+    ADDWF	InputPtr, W		; reject commands like "R "
+    MOVWF	FSR
+    MOVF	INDF, W
+    BTFSC	STATUS, 2
+    GOTO	Input_Invalid
+    DECF	InputPtr, F
+    CALL	Text_Decimal
+    XORLW	0x00			; check if W is 0 (success!)
+    BTFSC	STATUS, 2		; proceed to print character if so
+    GOTO	Command_Handler_Page_1
+    MOVWF	DataByte		; save W
+    XORLW	0xFD			; check for buffer overrun
+    BTFSS	STATUS, 2		; is W = 0xFD?
+    GOTO	Input_Invalid		; if not, print invalid input message
+    MOVLW	0x80
+    CALL	TextMessage
+    MOVLW	0x82
+    CALL	TextMessage
+    CALL	USART_SendCRLF
+    GOTO	Command_Handler_End
+Command_Handler_Page_Display:
+    ; if command P was used with no arguments, display the entire page buffer
+    ; first, check if PageSize is zero. Error out if so
+    ; 
+    ; if we have something to display, print a message and then print
+    ; every byte in the page buffer starting at 0x40
+    MOVF	PageSize, F
+    BTFSC	STATUS, 2
+    GOTO	Input_Invalid
+    MOVLW	0x1B
+    CALL	TextMessage
+    CLRF	PagePtr
+    CALL	USART_SendCRLF
+Command_Handler_Page_Disp_Loop:
+    ; load the indirect address into FSR, grab a byte, and print it. Then
+    ; print a space and increment the page pointer. Check if the page pointer
+    ; equals the page size and end if it is.
+    ;
+    ; if we haven't reached the end of the page yet, check if the page pointer
+    ; is divisible by 32. If not, return to beginning of loop. If so, print
+    ; a new line and then loop around.
+    MOVLW	0x40
+    ADDWF	PagePtr, W
+    MOVWF	FSR
+    MOVF	INDF, W
+    CALL	USART_PrintBytetoChar
+    MOVLW	0x20
+    CALL	USART_SendByte
+    INCF	PagePtr, F
+    MOVF	PageSize, W
+    XORWF	PagePtr, W
+    BTFSC	STATUS, 2
+    GOTO	Command_Handler_Page_Display_End
+    MOVF	PagePtr, W
+    ANDLW	0x1F
+    BTFSS	STATUS, 2
+    GOTO	Command_Handler_Page_Disp_Loop
+    CALL	USART_SendCRLF
+    GOTO	Command_Handler_Page_Disp_Loop
+Command_Handler_Page_Display_End:
+    CALL	USART_SendCRLF
+    GOTO	Command_Handler_End
+Command_Handler_Page_1:
+    ; if we are here, a decimal quantity was written into InByteH:InByteL.
+    ; we can only accept values between 1 and 64. Let us check both of those
+    ; values now.
+    MOVF	InByteH, W		; check if input was higher
+    BTFSS	STATUS, 2		; than 255 (high byte should be zero)
+    GOTO	Input_Invalid
+    MOVF	InByteL, W		; check if input is zero
+    BTFSC	STATUS, 2		; if it is, error out
+    GOTO	Input_Invalid
+    ADDLW	0xBF			; add 191 to W. If W is higher than 64,
+    BTFSC	STATUS, 0		; carry will set and we error out again
+    GOTO	Input_Invalid
+    MOVF	InByteL, W		; if everything passes, load byte in W
+    MOVWF	PageSize
+Command_Handler_Page_2:
+    ; now that the input has passed the 1-64 check, initialize the variables
+    ; in the page buffer.
+    ;
+    ; also clear InByteL and InByteH. Low will be used as temp storage for
+    ; data until we can move it to the buffer. High will be used as a character
+    ; counter so we can keep track of how many characters are input.
+    CLRF	InByteL
+    CLRF	InByteH
+    MOVLW	0x40			; pointer to 64
+    MOVWF	PagePtr			; store in memory
+Command_Handler_Page_2.5:
+    DECF	PagePtr, F		; count the pointer down by one
+    MOVF	PagePtr, W		; store the new value in W
+    ADDLW	0x40			; add an offset
+    MOVWF	FSR			; use offset+pointer in W to point to
+    CLRF	INDF			; memory in buffer and clear it
+    MOVF	PagePtr, F		; bit check PagePtr
+    BTFSC	STATUS, 2		; if PagePtr = 0, move on
+    GOTO	Command_Handler_Page_3	; next part of routine gets data
+    GOTO	Command_Handler_Page_2.5
+Command_Handler_Page_3:
+    ; page buffer is zero-initialized, page pointer is at zero, and we are
+    ; ready to start taking characters.
+    MOVLW	0x1C
+    CALL	TextMessage
+    CALL	USART_SendCRLF
+Command_Handler_Page_3.5:
+    ; loop for retrieving data from serial port. First, check if the byte is
+    ; 0x0D or 0x0A (Enter Key pressed). If so, we exit the page entry routine
+    ; with however many bytes we managed to grab.
+    ;
+    ; if not enter, bump over to the ASCII/hex validation routine. If it fails,
+    ; don't do anything. Go back and get another byte.
+    ; 
+    ; if the command passes, rotate left InByteL four times and then OR it with
+    ; W. This preserves whatever was written in the low nibble already. Also
+    ; increment InByteH. Display the typed character on the screen.
+    ;
+    ; if InByteH is even, record InByteL in the current buffer location. Echo
+    ; a space character to the terminal. Increment the buffer pointer. If the
+    ; buffer pointer equals the buffer size, end the routine.
+    ; 
+    ; check if InByteH is divisible by 64 (should only happen one time). If
+    ; it is, print CRLF and start on the new line.
+    CALL	USART_GetByte
+    MOVWF	DataByte		; save W to memory
+    XORLW	0x0D			; is it Enter?
+    BTFSC	STATUS, 2
+    GOTO	Command_Handler_Page_End
+    MOVF	DataByte, W
+    XORLW	0x0A
+    BTFSC	STATUS, 2
+    GOTO	Command_Handler_Page_End
+    MOVF	DataByte, W
+    CALL	Check_ASCII_Hex
+    BTFSC	STATUS, 0
+    GOTO	Command_Handler_Page_3.5
+    SWAPF	InByteL, F
+    IORWF	InByteL, F
+    MOVF	DataByte, W
+    CALL	USART_SendByte
+    INCF	InByteH, F
+    BTFSC	InByteH, 0
+    GOTO	Command_Handler_Page_3.5
+    MOVF	PagePtr, W
+    ADDLW	0x40
+    MOVWF	FSR
+    MOVF	InByteL, W
+    MOVWF	INDF
+    CLRF	InByteL
+    MOVLW	0x20
+    CALL	USART_SendByte
+    INCF	PagePtr, F
+    MOVF	PagePtr, W
+    XORWF	PageSize, W
+    BTFSC	STATUS, 2
+    GOTO	Command_Handler_Page_End
+    MOVF	InByteH, W
+    ANDLW	0x3F
+    BTFSS	STATUS, 2
+    GOTO	Command_Handler_Page_3.5
+    CALL	USART_SendCRLF
+    GOTO	Command_Handler_Page_3.5
+Command_Handler_Page_End:
+    MOVF	PagePtr, W
+    MOVWF	PageSize
+    CALL	USART_SendCRLF
+    MOVF	PagePtr, W
+    CALL	Decimal_Text
+    MOVLW	0x1D
     CALL	TextMessage
     GOTO	Command_Handler_End
     
@@ -1030,6 +1489,7 @@ Command_Handler_Write_Go:
     CALL	USART_PrintBytetoChar
     CALL	USART_SendCRLF		; print endline characters to terminal
     MOVLW	0x0A			; delay 10 mS to allow the ROM to write
+    MOVWF	D1
     CALL	EEPROM_msDelay
     BSF		STATUS, RP0		; set PORTD to input
     BCF		STATUS, RP1
@@ -1058,7 +1518,7 @@ Command_Handler_Inc:
     ; byte and do a 
     MOVF	AddressL, W
     MOVWF	InByteL
-    INCF	InByteL
+    INCF	InByteL, F
     MOVF	AddressH, W
     MOVWF	InByteH
     MOVF	InByteL, F
@@ -1449,7 +1909,59 @@ Text_Hexadecimal_BufferEnd:
     ; set W to -3. We encountered an input that exceeds 8 bytes.
     MOVLW	0xFD
     RETURN
-        
+
+Check_ASCII_Hex:
+    ; checks if the byte in W is a hexadecimal value. Works on upper and
+    ; lower case letters.
+    ; In: W - one byte of ASCII data
+    ; Out: Carry set if not a hexadecimal digit, W clear
+    ;      Carry clear if a hexadecimal digit, W = value of ASCII digit
+    MOVWF	D1			; save W
+    ; first check for numerical digit by subtracting 0x30 from W and checking
+    ; the carry flag. If it is not set, W < 0x30 and we already know it
+    ; does not pass the check.
+    ;
+    ; Next, add 0xF6 which will cause the carry flag to set if W > 9. If W < 10
+    ; then we handle W as a digit and return. Adding 0x0A to the value reverts
+    ; it to 0x100 plus its numeric value. We clear Carry and return.
+    ADDLW	0xD0
+    BTFSS	STATUS, 0
+    GOTO	Check_ASCII_Hex_Fail
+    BCF		STATUS, 0
+    ADDLW	0xF6
+    BTFSC	STATUS, 0
+    GOTO	Check_ASCII_Hex_Ltr
+    ADDLW	0x0A
+    BCF		STATUS, 0
+    RETURN
+Check_ASCII_Hex_Ltr:
+    ; letter check - restore W from memory. AND it with 0xDF to convert any
+    ; lower case letters to upper case. Lastly, add 0xBF. Anything lower than
+    ; 0x41, 'A' will fail the check.
+    ;
+    ; should we still be here, clear the carry flag and add 0xFA. The value
+    ; in W would be 0-5 for a valid number, so adding 0xFA will make the carry
+    ; set if the value is higher than 5. A set carry causes this check to fail.
+    ;
+    ; if we've made it past the second check, add 0x10 to restore the hex
+    ; value, clear the carry flag, and return.
+    MOVF	D1, W
+    ANDLW	0xDF
+    ADDLW	0xBF
+    BTFSS	STATUS, 0
+    GOTO	Check_ASCII_Hex_Fail
+    BCF		STATUS, 0
+    ADDLW	0xFA
+    BTFSC	STATUS, 0
+    GOTO	Check_ASCII_Hex_Fail
+    ADDLW	0x10
+    BCF		STATUS, 0
+    RETURN
+Check_ASCII_Hex_Fail:
+    BSF		STATUS, 0
+    CLRW
+    RETURN
+    
 Command_Handler_Next:
     INCF	InputPtr, F		; point to the next character
     MOVF	InputPtr, W		; save it in W
@@ -1508,6 +2020,15 @@ Command_Handler_End:
 ; #13 - Write attempt message #1
 ; #14 - Write attempt message #2
 ; #15 - Write result message
+; #16 - Fill prompt - displays byte and number of kilobytes to fill
+; #17 - Fill prompt - prints the word " kilobytes."
+; #18 - Fill prompt - asks user to press Y to continue or else to cancel
+; #19 - Fill cancel message
+; #1A - Fill complete message
+; #1B - Page display message
+; #1C - Page buffer data entry prompt
+; #1D - Page buffer success message
+; #1E - Block write success message
 ; #80 - Error message prefix
 ; #81 - Invalid input error
 ; #82 - Excessive input error
@@ -1515,6 +2036,8 @@ Command_Handler_End:
 ; #84 - Decrement error
 ; #85 - ROM Size unspecified error
 ; #86 - Address out of bounds error
+; #87 - Block excess demand error
+; #88 - Block address invalid error
     
 TextMessage:
     CLRF	MsgIndex	    ; clear the counter used to display text 
@@ -1595,7 +2118,6 @@ TextMessageLoop06:
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgBText	    ; get a string character into W
     GOTO	TextMessageLoopEnd  ; proceed to printing it    
-
 TextMessageLoop07:
     ; displays help for 'D' command
     MOVF	MsgNumber, W
@@ -1607,7 +2129,6 @@ TextMessageLoop07:
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgDText	    ; get a string character into W
     GOTO	TextMessageLoopEnd  ; proceed to printing it 
-
 TextMessageLoop08:
     ; displays help for 'F' command
     MOVF	MsgNumber, W
@@ -1619,7 +2140,6 @@ TextMessageLoop08:
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgFText	    ; get a string character into W
     GOTO	TextMessageLoopEnd  ; proceed to printing it 
-    
 TextMessageLoop09:
     ; displays help for 'L' command
     MOVF	MsgNumber, W
@@ -1631,7 +2151,6 @@ TextMessageLoop09:
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgLText	    ; get a string character into W
     GOTO	TextMessageLoopEnd  ; proceed to printing it 
-
 TextMessageLoop0A:
     ; displays help for 'P' command
     MOVF	MsgNumber, W
@@ -1643,7 +2162,6 @@ TextMessageLoop0A:
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgPText	    ; get a string character into W
     GOTO	TextMessageLoopEnd  ; proceed to printing it 
-    
 TextMessageLoop0B:
     ; displays help for 'R' command
     MOVF	MsgNumber, W
@@ -1655,7 +2173,6 @@ TextMessageLoop0B:
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgRText	    ; get a string character into W
     GOTO	TextMessageLoopEnd  ; proceed to printing it 
-
 TextMessageLoop0C:
     ; displays help for 'S' command
     MOVF	MsgNumber, W
@@ -1667,7 +2184,6 @@ TextMessageLoop0C:
     MOVF	MsgIndex, W	    ; load character counter into W
     CALL	HelpMsgSText	    ; get a string character into W
     GOTO	TextMessageLoopEnd  ; proceed to printing it 
-
 TextMessageLoop0D:
     ; displays help for 'U' command
     MOVF	MsgNumber, W
@@ -1829,12 +2345,133 @@ TextMessageLoop20:
     MOVF	MsgNumber, W
     XORLW	0x15
     BTFSS	STATUS, 2
-    GOTO	TextMessageNotFound
+    GOTO	TextMessageLoop21
     MOVLW	0x0C
     MOVWF	PCLATH
     MOVF	MsgIndex, W
     CALL	WriteByteMsg3Text
-    GOTO	TextMessageLoopEnd 
+    GOTO	TextMessageLoopEnd
+TextMessageLoop21:
+    ; Fill message prompt. Displays byte entered and ROM size
+    MOVF	MsgNumber, W
+    XORLW	0x16
+    BTFSS	STATUS, 2
+    GOTO	TextMessageLoop22
+    MOVLW	0x0C
+    MOVWF	PCLATH
+    MOVF	MsgIndex, W
+    CALL	FillMsg1Text
+    GOTO	TextMessageLoopEnd
+TextMessageLoop22:
+    ; Fill message prompt. Displays " kilobytes." after the ROM size.
+    MOVF	MsgNumber, W
+    XORLW	0x17
+    BTFSS	STATUS, 2
+    GOTO	TextMessageLoop23
+    MOVLW	0x0C
+    MOVWF	PCLATH
+    MOVF	MsgIndex, W
+    CALL	FillMsg2Text
+    GOTO	TextMessageLoopEnd
+TextMessageLoop23:
+    ; Fill message prompt. Tells user to hit Y or any other key
+    MOVF	MsgNumber, W
+    XORLW	0x18
+    BTFSS	STATUS, 2
+    GOTO	TextMessageLoop24
+    MOVLW	0x0D
+    MOVWF	PCLATH
+    MOVF	MsgIndex, W
+    CALL	FillMsg3Text
+    GOTO	TextMessageLoopEnd
+TextMessageLoop24:
+    ; Fill cancel message. Displayed before going back to main loop.
+    MOVF	MsgNumber, W
+    XORLW	0x19
+    BTFSS	STATUS, 2
+    GOTO	TextMessageLoop25
+    MOVLW	0x0D
+    MOVWF	PCLATH
+    MOVF	MsgIndex, W
+    CALL	FillMsg4Text
+    GOTO	TextMessageLoopEnd
+TextMessageLoop25:
+    ; Fill complete message. Displays the written byte.
+    MOVF	MsgNumber, W
+    XORLW	0x1A
+    BTFSS	STATUS, 2
+    GOTO	TextMessageLoop26
+    MOVLW	0x0D
+    MOVWF	PCLATH
+    MOVF	MsgIndex, W
+    CALL	FillMsg5Text
+    GOTO	TextMessageLoopEnd
+TextMessageLoop26:
+    ; Page display prompt - indicates what the printed bytes on screen are.
+    MOVF	MsgNumber, W
+    XORLW	0x1B
+    BTFSS	STATUS, 2
+    GOTO	TextMessageLoop27
+    MOVLW	0x0D
+    MOVWF	PCLATH
+    MOVF	MsgIndex, W
+    CALL	PageMsg1Text
+    GOTO	TextMessageLoopEnd
+TextMessageLoop27:
+    ; Page display prompt - indicates what the printed bytes on screen are.
+    MOVF	MsgNumber, W
+    XORLW	0x1C
+    BTFSS	STATUS, 2
+    GOTO	TextMessageLoop28
+    MOVLW	0x0D
+    MOVWF	PCLATH
+    MOVF	MsgIndex, W
+    CALL	PageMsg2Text
+    GOTO	TextMessageLoopEnd
+TextMessageLoop28:
+    ; Page buffer write success - indicates write to page buffer.
+    MOVF	MsgNumber, W
+    XORLW	0x1D
+    BTFSS	STATUS, 2
+    GOTO	TextMessageLoop29
+    MOVLW	0x0D
+    MOVWF	PCLATH
+    MOVF	MsgIndex, W
+    CALL	PageMsg3Text
+    GOTO	TextMessageLoopEnd
+TextMessageLoop29:
+    ; Block write success - indicates completion of block write to ROM.
+    MOVF	MsgNumber, W
+    XORLW	0x1E
+    BTFSS	STATUS, 2
+    GOTO	TextMessageLoop2A
+    MOVLW	0x0E
+    MOVWF	PCLATH
+    MOVF	MsgIndex, W
+    CALL	BlockMsg1Text
+    GOTO	TextMessageLoopEnd
+TextMessageLoop2A:
+    ; Block write error - bytes specified exceeds page capacity.
+    MOVF	MsgNumber, W
+    XORLW	0x86
+    BTFSS	STATUS, 2
+    GOTO	TextMessageLoop2B
+    MOVLW	0x0E
+    MOVWF	PCLATH
+    MOVF	MsgIndex, W
+    CALL	BlockMsg2Text
+    GOTO	TextMessageLoopEnd
+TextMessageLoop2B:
+    ; Block write error - invalid address for block write.
+    MOVF	MsgNumber, W
+    XORLW	0x87
+    BTFSS	STATUS, 2
+    GOTO	TextMessageNotFound
+    MOVLW	0x0E
+    MOVWF	PCLATH
+    MOVF	MsgIndex, W
+    CALL	BlockMsg3Text
+    GOTO	TextMessageLoopEnd
     
 TextMessageNotFound:    
     RETURN				; in case we don't find a match
@@ -2909,7 +3546,7 @@ AddressMsgText:				; 11 data words, message 11
     RETLW   ' '
     RETLW   0x00
 
-    ORG	    0xC00			; a page for message text (184 words)
+    ORG	    0xC00			; a page for message text (226 words)
 
 IncFailMsgText:				; 23 data words, message 83
     ; "Increment overflow."
@@ -3118,5 +3755,426 @@ WriteByteMsg3Text:				; 25 data words, message 15
     RETLW   's'
     RETLW   ' '
     RETLW   0x00
+    
+FillMsg1Text:					; 27 data words, message 16
+    ; " will be written to fill "
+    ADDWF   PCL, F
+    RETLW   ' '
+    RETLW   'w'
+    RETLW   'i'
+    RETLW   'l'
+    RETLW   'l'
+    RETLW   ' '
+    RETLW   'b'
+    RETLW   'e'
+    RETLW   ' '
+    RETLW   'w'
+    RETLW   'r'
+    RETLW   'i'
+    RETLW   't'
+    RETLW   't'
+    RETLW   'e'
+    RETLW   'n'
+    RETLW   ' '
+    RETLW   't'
+    RETLW   'o'
+    RETLW   ' '
+    RETLW   'f'
+    RETLW   'i'
+    RETLW   'l'
+    RETLW   'l'
+    RETLW   ' '
+    RETLW   0x00
+    
+FillMsg2Text:					; 15 data words, message 17
+    ; " kilobytes."
+    ADDWF   PCL, F
+    RETLW   ' '
+    RETLW   'k'
+    RETLW   'i'
+    RETLW   'l'
+    RETLW   'o'
+    RETLW   'b'
+    RETLW   'y'
+    RETLW   't'
+    RETLW   'e'
+    RETLW   's'
+    RETLW   '.'
+    RETLW   0x0D
+    RETLW   0x0A
+    RETLW   0x00
+    
+    ORG	    0xD00			; a page for message text (219 words)
+    
+FillMsg3Text:				; 48 data words, message 18
+    ; "Press Y to continue, any other key to cancel. "
+    ADDWF   PCL, F
+    RETLW   'P'
+    RETLW   'r'
+    RETLW   'e'
+    RETLW   's'
+    RETLW   's'
+    RETLW   ' '
+    RETLW   'Y'
+    RETLW   ' '
+    RETLW   't'
+    RETLW   'o'
+    RETLW   ' '
+    RETLW   'c'
+    RETLW   'o'
+    RETLW   'n'
+    RETLW   't'
+    RETLW   'i'
+    RETLW   'n'
+    RETLW   'u'
+    RETLW   'e'
+    RETLW   ','
+    RETLW   ' '
+    RETLW   'a'
+    RETLW   'n'
+    RETLW   'y'
+    RETLW   ' '
+    RETLW   'o'
+    RETLW   't'
+    RETLW   'h'
+    RETLW   'e'
+    RETLW   'r'
+    RETLW   ' '
+    RETLW   'k'
+    RETLW   'e'
+    RETLW   'y'
+    RETLW   ' '
+    RETLW   't'
+    RETLW   'o'
+    RETLW   ' '
+    RETLW   'c'
+    RETLW   'a'
+    RETLW   'n'
+    RETLW   'c'
+    RETLW   'e'
+    RETLW   'l'
+    RETLW   '.'
+    RETLW   ' '
+    RETLW   0x00
+    
+FillMsg4Text:				    ; 28 data words, message 19
+    ; "Canceled fill operation."
+    ADDWF   PCL, F
+    RETLW   'C'
+    RETLW   'a'
+    RETLW   'n'
+    RETLW   'c'
+    RETLW   'e'
+    RETLW   'l'
+    RETLW   'e'
+    RETLW   'd'
+    RETLW   ' '
+    RETLW   'f'
+    RETLW   'i'
+    RETLW   'l'
+    RETLW   'l'
+    RETLW   ' '
+    RETLW   'o'
+    RETLW   'p'
+    RETLW   'e'
+    RETLW   'r'
+    RETLW   'a'
+    RETLW   't'
+    RETLW   'i'
+    RETLW   'o'
+    RETLW   'n'
+    RETLW   '.'
+    RETLW   0x0D
+    RETLW   0x0A
+    RETLW   0x00
+    
+FillMsg5Text:				    ; 34 data words, message 1A
+    ; " written to all ROM addresses."
+    ADDWF   PCL, F
+    RETLW   ' '
+    RETLW   'w'
+    RETLW   'r'
+    RETLW   'i'
+    RETLW   't'
+    RETLW   't'
+    RETLW   'e'
+    RETLW   'n'
+    RETLW   ' '
+    RETLW   't'
+    RETLW   'o'
+    RETLW   ' '
+    RETLW   'a'
+    RETLW   'l'
+    RETLW   'l'
+    RETLW   ' '
+    RETLW   'R'
+    RETLW   'O'
+    RETLW   'M'
+    RETLW   ' '
+    RETLW   'a'
+    RETLW   'd'
+    RETLW   'd'
+    RETLW   'r'
+    RETLW   'e'
+    RETLW   's'
+    RETLW   's'
+    RETLW   'e'
+    RETLW   's'
+    RETLW   '.'
+    RETLW   0x0D
+    RETLW   0x0A
+    RETLW   0x00
+
+PageMsg1Text:				    ; 25 data words, message 1B
+    ; "Page buffer contents:"
+    ADDWF   PCL, F
+    RETLW   'P'
+    RETLW   'a'
+    RETLW   'g'
+    RETLW   'e'
+    RETLW   ' '
+    RETLW   'b'
+    RETLW   'u'
+    RETLW   'f'
+    RETLW   'f'
+    RETLW   'e'
+    RETLW   'r'
+    RETLW   ' '
+    RETLW   'c'
+    RETLW   'o'
+    RETLW   'n'
+    RETLW   't'
+    RETLW   'e'
+    RETLW   'n'
+    RETLW   't'
+    RETLW   's'
+    RETLW   ':'
+    RETLW   0x0D
+    RETLW   0x0A
+    RETLW   0x00
+
+PageMsg2Text:				    ; 49 data words, message 1C
+    ; "Enter hexadecimal bytes. Press ENTER to stop."
+    ADDWF   PCL, F
+    RETLW   'E'
+    RETLW   'n'
+    RETLW   't'
+    RETLW   'e'
+    RETLW   'r'
+    RETLW   ' '
+    RETLW   'h'
+    RETLW   'e'
+    RETLW   'x'
+    RETLW   'a'
+    RETLW   'd'
+    RETLW   'e'
+    RETLW   'c'
+    RETLW   'i'
+    RETLW   'm'
+    RETLW   'a'
+    RETLW   'l'
+    RETLW   ' '
+    RETLW   'b'
+    RETLW   'y'
+    RETLW   't'
+    RETLW   'e'
+    RETLW   's'
+    RETLW   '.'
+    RETLW   ' '
+    RETLW   'P'
+    RETLW   'r'
+    RETLW   'e'
+    RETLW   's'
+    RETLW   's'
+    RETLW   ' '
+    RETLW   'E'
+    RETLW   'N'
+    RETLW   'T'
+    RETLW   'E'
+    RETLW   'R'
+    RETLW   ' '
+    RETLW   't'
+    RETLW   'o'
+    RETLW   ' '
+    RETLW   's'
+    RETLW   't'
+    RETLW   'o'
+    RETLW   'p'
+    RETLW   '.'
+    RETLW   0x0D
+    RETLW   0x0A
+    RETLW   0x00
+
+PageMsg3Text:				    ; 35 data words, message 1D
+    ; " bytes loaded into page buffer."
+    ADDWF   PCL, F
+    RETLW   ' '
+    RETLW   'b'
+    RETLW   'y'
+    RETLW   't'
+    RETLW   'e'
+    RETLW   's'
+    RETLW   ' '
+    RETLW   'l'
+    RETLW   'o'
+    RETLW   'a'
+    RETLW   'd'
+    RETLW   'e'
+    RETLW   'd'
+    RETLW   ' '
+    RETLW   'i'
+    RETLW   'n'
+    RETLW   't'
+    RETLW   'o'
+    RETLW   ' '
+    RETLW   'p'
+    RETLW   'a'
+    RETLW   'g'
+    RETLW   'e'
+    RETLW   ' '
+    RETLW   'b'
+    RETLW   'u'
+    RETLW   'f'
+    RETLW   'f'
+    RETLW   'e'
+    RETLW   'r'
+    RETLW   '.'
+    RETLW   0x0D
+    RETLW   0x0A
+    RETLW   0x00
+    
+    ORG	    0xE00		    ; a page for message text (123 words)
+    
+BlockMsg1Text:					; 42 data words, message 1E
+    ; " bytes written to ROM. Current address: "
+    ADDWF   PCL, F
+    RETLW   ' '
+    RETLW   'b'
+    RETLW   'y'
+    RETLW   't'
+    RETLW   'e'
+    RETLW   's'
+    RETLW   ' '
+    RETLW   'w'
+    RETLW   'r'
+    RETLW   'i'
+    RETLW   't'
+    RETLW   't'
+    RETLW   'e'
+    RETLW   'n'
+    RETLW   ' '
+    RETLW   't'
+    RETLW   'o'
+    RETLW   ' '
+    RETLW   'R'
+    RETLW   'O'
+    RETLW   'M'
+    RETLW   '.'
+    RETLW   ' '
+    RETLW   'C'
+    RETLW   'u'
+    RETLW   'r'
+    RETLW   'r'
+    RETLW   'e'
+    RETLW   'n'
+    RETLW   't'
+    RETLW   ' '
+    RETLW   'a'
+    RETLW   'd'
+    RETLW   'd'
+    RETLW   'r'
+    RETLW   'e'
+    RETLW   's'
+    RETLW   's'
+    RETLW   ':'
+    RETLW   ' '
+    RETLW   0x00
+    
+BlockMsg2Text:			    ; 37 data words, message 86
+    ; " not enough bytes in page buffer."
+    ADDWF   PCL, F
+    RETLW   ' '
+    RETLW   'n'
+    RETLW   'o'
+    RETLW   't'
+    RETLW   ' '
+    RETLW   'e'
+    RETLW   'n'
+    RETLW   'o'
+    RETLW   'u'
+    RETLW   'g'
+    RETLW   'h'
+    RETLW   ' '
+    RETLW   'b'
+    RETLW   'y'
+    RETLW   't'
+    RETLW   'e'
+    RETLW   's'
+    RETLW   ' '
+    RETLW   'i'
+    RETLW   'n'
+    RETLW   ' '
+    RETLW   'p'
+    RETLW   'a'
+    RETLW   'g'
+    RETLW   'e'
+    RETLW   ' '
+    RETLW   'b'
+    RETLW   'u'
+    RETLW   'f'
+    RETLW   'f'
+    RETLW   'e'
+    RETLW   'r'
+    RETLW   '.'
+    RETLW   0x0D
+    RETLW   0x0A
+    RETLW   0x00
+
+BlockMsg3Text:			    ; 44 data words, message 87
+    ; " block write must start at 64-byte page."
+    ADDWF   PCL, F
+    RETLW   ' '
+    RETLW   'b'
+    RETLW   'l'
+    RETLW   'o'
+    RETLW   'c'
+    RETLW   'k'
+    RETLW   ' '
+    RETLW   'w'
+    RETLW   'r'
+    RETLW   'i'
+    RETLW   't'
+    RETLW   'e'
+    RETLW   ' '
+    RETLW   'm'
+    RETLW   'u'
+    RETLW   's'
+    RETLW   't'
+    RETLW   ' '
+    RETLW   's'
+    RETLW   't'
+    RETLW   'a'
+    RETLW   'r'
+    RETLW   't'
+    RETLW   ' '
+    RETLW   'a'
+    RETLW   't'
+    RETLW   ' '
+    RETLW   '6'
+    RETLW   '4'
+    RETLW   '-'
+    RETLW   'b'
+    RETLW   'y'
+    RETLW   't'
+    RETLW   'e'
+    RETLW   ' '
+    RETLW   'p'
+    RETLW   'a'
+    RETLW   'g'
+    RETLW   'e'
+    RETLW   '.'
+    RETLW   0x0D
+    RETLW   0x0A
+    RETLW   0x00    
     
     END
